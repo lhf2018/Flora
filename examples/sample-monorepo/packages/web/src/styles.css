@@ -1,0 +1,5 @@
+/* demo UI styles — makes this module a blossom species */
+.cart {
+  display: flex;
+  gap: 8px;
+}

@@ -1,0 +1,20 @@
+{
+  "name": "flora",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Codebase → living architecture garden",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev:studio": "pnpm --filter @flora/studio dev",
+    "studio": "pnpm --filter @flora/cli start studio",
+    "analyze": "pnpm --filter @flora/cli start analyze",
+    "analyze:sample": "pnpm --filter @flora/cli start analyze ../../examples/sample-monorepo",
+    "compare": "pnpm --filter @flora/cli start compare",
+    "timeline": "pnpm --filter @flora/cli start timeline",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

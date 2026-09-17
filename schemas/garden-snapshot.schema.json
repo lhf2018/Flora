@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flora.dev/schemas/garden-snapshot.schema.json",
+  "title": "GardenSnapshot",
+  "type": "object",
+  "required": ["meta", "plants", "vines", "pollutions", "layout"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["projectId", "commit", "branch", "capturedAt", "floraVersion"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "commit": { "type": "string" },
+        "branch": { "type": "string" },
+        "capturedAt": { "type": "string", "format": "date-time" },
+        "floraVersion": { "type": "string" },
+        "rootPath": { "type": "string" },
+        "strategy": { "type": "string" },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "plants": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Plant" }
+    },
+    "vines": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Vine" }
+    },
+    "pollutions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Pollution" }
+    },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "positions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Plant": {
+      "type": "object",
+      "required": ["id", "label", "metrics", "state", "violations"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "path": { "type": "string" },
+        "layer": { "type": "string" },
+        "metrics": {
+          "type": "object",
+          "required": ["coverage", "coupling", "churn", "ageDays"],
+          "properties": {
+            "coverage": { "type": "number" },
+            "coupling": { "type": "number" },
+            "churn": { "type": "number" },
+            "ageDays": { "type": "number" }
+          }
+        },
+        "state": {
+          "type": "string",
+          "enum": ["healthy", "blooming", "wilting", "dying", "entangled"]
+        },
+        "violations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Violation" }
+        }
+      }
+    },
+    "Vine": {
+      "type": "object",
+      "required": ["id", "from", "to", "strength", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "strength": { "type": "number" },
+        "kind": { "type": "string", "enum": ["normal", "illegal", "cycle"] },
+        "cycleGroupId": { "type": "string" }
+      }
+    },
+    "Pollution": {
+      "type": "object",
+      "required": ["epicenter", "radius", "intensity", "reason"],
+      "properties": {
+        "epicenter": { "type": "string" },
+        "radius": { "type": "number" },
+        "intensity": { "type": "number" },
+        "reason": { "type": "string" }
+      }
+    },
+    "Violation": {
+      "type": "object",
+      "required": ["ruleId", "message", "severity"],
+      "properties": {
+        "ruleId": { "type": "string" },
+        "message": { "type": "string" },
+        "severity": { "type": "string", "enum": ["warn", "error"] }
+      }
+    }
+  }
+}

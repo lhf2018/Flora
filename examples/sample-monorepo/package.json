@@ -1,0 +1,7 @@
+{
+  "name": "flora-sample",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

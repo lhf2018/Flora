@@ -1,0 +1,12 @@
+node_modules
+dist
+.flora
+*.log
+.DS_Store
+.env
+.env.*
+coverage
+.turbo
+*.tsbuildinfo
+apps/studio/dist
+packages/*/dist

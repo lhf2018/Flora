@@ -1,0 +1,24 @@
+layers:
+  - name: domain
+    paths:
+      - packages/domain/**
+  - name: application
+    paths:
+      - packages/order/**
+      - packages/payment/**
+  - name: ui
+    paths:
+      - packages/web/**
+
+forbidden:
+  - from: domain
+    to: application
+    message: "domain 不得依赖 application 层"
+    severity: error
+  - from: domain
+    to: ui
+    message: "domain 不得依赖 ui"
+    severity: error
+  - when: cycle
+    message: "禁止循环依赖"
+    severity: error
