@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { exists, listDirs, readJson, slugId, walkFiles } from "./fs.js";
-import { adapterForFile, ALL_ADAPTERS, edgeSourceExts } from "./adapters.js";
+import {
+  adapterForFile,
+  ALL_ADAPTERS,
+  edgeSourceExts,
+  isModuleEntryFile,
+} from "./adapters.js";
 import type { AggregateGranularity, ModuleGraph } from "./types.js";
 import { DEFAULT_IGNORE } from "./types.js";
 import { loadTsPathAliases, resolveAliasSpec } from "./aliases.js";
@@ -10,6 +15,11 @@ import {
   loadRules,
   type ArchitectureRules,
 } from "./rules.js";
+import {
+  applyModulesMap,
+  loadModulesMap,
+  type FloraModulesMap,
+} from "./modules-map.js";
 
 interface PkgJson {
   name?: string;
@@ -214,20 +224,29 @@ function resolveSpecToModule(
     spec: string,
     existsFn: (p: string) => boolean,
   ) => string | null,
-): string | null {
+): { moduleId: string; resolvedFile: string | null } | null {
   // tsconfig paths alias first (e.g. @/ → src/)
   if (!spec.startsWith(".") && !spec.startsWith("/")) {
     const aliased = resolveAliasSpec(spec, aliases, exists);
     if (aliased) {
       const id = fileToModule(aliased, modules);
-      if (id) return id;
+      if (id) return { moduleId: id, resolvedFile: aliased };
     }
-    // skip obvious external packages (no workspace match)
     const top = spec.startsWith("@")
       ? spec.split("/").slice(0, 2).join("/")
       : spec.split("/")[0]!;
-    if (nameIndex.has(spec)) return nameIndex.get(spec)!;
-    if (nameIndex.has(top)) return nameIndex.get(top)!;
+    if (nameIndex.has(spec)) {
+      return { moduleId: nameIndex.get(spec)!, resolvedFile: null };
+    }
+    if (nameIndex.has(top)) {
+      // deep package path like @scope/pkg/src/foo
+      const rest = spec.slice(top.length);
+      const deep = rest.includes("/") && rest !== "";
+      return {
+        moduleId: nameIndex.get(top)!,
+        resolvedFile: deep ? `__deep__:${spec}` : null,
+      };
+    }
     let best: { id: string; len: number } | null = null;
     for (const [name, id] of nameIndex) {
       if (
@@ -238,32 +257,52 @@ function resolveSpecToModule(
         if (!best || name.length > best.len) best = { id, len: name.length };
       }
     }
-    return best?.id ?? null;
+    if (best) {
+      const deep = spec.length > best.len + 1;
+      return {
+        moduleId: best.id,
+        resolvedFile: deep ? `__deep__:${spec}` : null,
+      };
+    }
+    return null;
   }
 
   if (adapterResolve) {
     const resolved = adapterResolve(fromFile, spec, exists);
-    if (resolved) return fileToModule(resolved, modules);
+    if (resolved) {
+      const id = fileToModule(resolved, modules);
+      if (id) return { moduleId: id, resolvedFile: resolved };
+    }
   }
   const resolved = resolveImport(fromFile, spec);
   if (!resolved) return null;
-  return fileToModule(resolved, modules);
+  const id = fileToModule(resolved, modules);
+  if (!id) return null;
+  return { moduleId: id, resolvedFile: resolved };
 }
 
 function buildEdgesFromImports(
   root: string,
   modules: Array<{ id: string; path: string }>,
   ignore: string[],
-): { edges: Array<{ from: string; to: string; weight: number }>; notes: string[] } {
+): {
+  edges: ModuleGraph["edges"];
+  notes: string[];
+} {
   const weights = new Map<string, number>();
+  const deepFlags = new Map<string, boolean>();
+  const specsMap = new Map<string, Set<string>>();
   const nameIndex = buildPackageNameIndex(modules);
   const aliases = loadTsPathAliases(
     root,
     modules.map((m) => m.path),
   );
+  const modById = new Map(modules.map((m) => [m.id, m]));
   const files = walkFiles(root, ignore, 12000, edgeSourceExts());
   const adaptersUsed = new Set<string>();
   let unresolvedExternal = 0;
+  let typeOnlySkipped = 0;
+  let deepCount = 0;
 
   for (const file of files) {
     const fromId = fileToModule(file, modules);
@@ -277,15 +316,18 @@ function buildEdgesFromImports(
     } catch {
       continue;
     }
+    // count type-only before filter (adapter already drops them; detect for notes)
+    if (/\bimport\s+type\b|\bexport\s+type\b/.test(source)) {
+      typeOnlySkipped += 1;
+    }
     for (const hit of adapter.extractImports(source, file)) {
-      // skip node builtins
       if (
         hit.spec.startsWith("node:") ||
         ["fs", "path", "http", "os", "util", "crypto", "url"].includes(hit.spec)
       ) {
         continue;
       }
-      const toId = resolveSpecToModule(
+      const hitRes = resolveSpecToModule(
         file,
         hit.spec,
         modules,
@@ -293,15 +335,33 @@ function buildEdgesFromImports(
         aliases,
         adapter.resolve?.bind(adapter),
       );
-      if (!toId) {
+      if (!hitRes) {
         if (!hit.spec.startsWith(".") && !hit.spec.startsWith("/")) {
           unresolvedExternal++;
         }
         continue;
       }
+      const { moduleId: toId, resolvedFile } = hitRes;
       if (toId === fromId) continue;
       const key = `${fromId}→${toId}`;
       weights.set(key, (weights.get(key) ?? 0) + 1);
+      const specs = specsMap.get(key) ?? new Set<string>();
+      specs.add(hit.spec);
+      specsMap.set(key, specs);
+
+      let deep = false;
+      if (resolvedFile?.startsWith("__deep__:")) {
+        deep = true;
+      } else if (resolvedFile) {
+        const mod = modById.get(toId);
+        if (mod && !isModuleEntryFile(mod.path, resolvedFile)) {
+          deep = true;
+        }
+      }
+      if (deep) {
+        deepFlags.set(key, true);
+        deepCount++;
+      }
     }
   }
 
@@ -313,6 +373,10 @@ function buildEdgesFromImports(
   if (adaptersUsed.size) {
     notes.push(`启用 Adapter: ${[...adaptersUsed].join(", ")}`);
   }
+  if (typeOnlySkipped) {
+    notes.push(`已跳过 type-only import（约 ${typeOnlySkipped} 个文件含此类写法）`);
+  }
+  if (deepCount) notes.push(`深入包内部引用 ${deepCount} 处`);
   if (unresolvedExternal > 0) {
     notes.push(`外部依赖引用约 ${unresolvedExternal} 处（已忽略）`);
   }
@@ -320,10 +384,113 @@ function buildEdgesFromImports(
   return {
     edges: [...weights.entries()].map(([key, weight]) => {
       const [from, to] = key.split("→") as [string, string];
-      return { from, to, weight };
+      return {
+        from,
+        to,
+        weight,
+        deep: deepFlags.get(key) ?? false,
+        importSpecs: [...(specsMap.get(key) ?? [])],
+      };
     }),
     notes,
   };
+}
+
+/** Soft edges from workspace package.json — fills gaps when imports weren't resolved. */
+function buildEdgesFromPackageJson(
+  modules: Array<{ id: string; path: string; label?: string }>,
+): {
+  edges: ModuleGraph["edges"];
+  notes: string[];
+} {
+  const nameToId = new Map<string, string>();
+  for (const m of modules) {
+    nameToId.set(m.id, m.id);
+    if (m.label) nameToId.set(m.label, m.id);
+    nameToId.set(path.basename(m.path), m.id);
+    const pkg = readJson<PkgJson & {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+    }>(path.join(m.path, "package.json"));
+    if (pkg?.name) nameToId.set(pkg.name, m.id);
+  }
+
+  const weights = new Map<string, number>();
+  const specsMap = new Map<string, Set<string>>();
+  let count = 0;
+
+  for (const m of modules) {
+    const pkg = readJson<{
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+    }>(path.join(m.path, "package.json"));
+    if (!pkg) continue;
+    const bags = [pkg.dependencies, pkg.devDependencies, pkg.peerDependencies];
+    for (const bag of bags) {
+      if (!bag) continue;
+      for (const depName of Object.keys(bag)) {
+        const toId = nameToId.get(depName);
+        if (!toId || toId === m.id) continue;
+        const key = `${m.id}→${toId}`;
+        // softer than a real import hit
+        weights.set(key, (weights.get(key) ?? 0) + 1);
+        const specs = specsMap.get(key) ?? new Set<string>();
+        specs.add(`pkg:${depName}`);
+        specsMap.set(key, specs);
+        count++;
+      }
+    }
+  }
+
+  const notes: string[] = [];
+  if (count) {
+    notes.push(`workspace package.json 依赖边 ${count} 条（补全漏解析的 import）`);
+  }
+
+  return {
+    edges: [...weights.entries()].map(([key, weight]) => {
+      const [from, to] = key.split("→") as [string, string];
+      return {
+        from,
+        to,
+        weight,
+        deep: false,
+        importSpecs: [...(specsMap.get(key) ?? [])],
+      };
+    }),
+    notes,
+  };
+}
+
+function mergeEdges(
+  primary: ModuleGraph["edges"],
+  secondary: ModuleGraph["edges"],
+): ModuleGraph["edges"] {
+  const map = new Map<string, ModuleGraph["edges"][number]>();
+  for (const e of primary) {
+    map.set(`${e.from}→${e.to}`, { ...e });
+  }
+  for (const e of secondary) {
+    const key = `${e.from}→${e.to}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...e });
+      continue;
+    }
+    const specs = new Set([
+      ...(prev.importSpecs ?? []),
+      ...(e.importSpecs ?? []),
+    ]);
+    map.set(key, {
+      ...prev,
+      weight: (prev.weight ?? 1) + (e.weight ?? 1),
+      deep: Boolean(prev.deep || e.deep),
+      importSpecs: [...specs],
+    });
+  }
+  return [...map.values()];
 }
 
 function discoverPackages(
@@ -460,19 +627,116 @@ function discoverFiles(
   return { modules, strategy: "file", notes };
 }
 
+function discoverFeatureDirs(
+  root: string,
+  ignore: string[],
+  rules?: ArchitectureRules | null,
+): { modules: ModuleGraph["modules"]; strategy: string; notes: string[] } | null {
+  const candidates = [
+    path.join(root, "src", "features"),
+    path.join(root, "src", "modules"),
+    path.join(root, "src", "packages"),
+    path.join(root, "src", "domains"),
+    path.join(root, "app", "modules"),
+  ];
+  const applyLayer = (rel: string, guessed?: string) =>
+    (rules ? layerFromRules(rel, rules) : undefined) ?? guessed;
+
+  for (const base of candidates) {
+    if (!exists(base)) continue;
+    const kids = listDirs(base, ignore);
+    if (kids.length < 2) continue;
+    const relBase = path.relative(root, base).replace(/\\/g, "/");
+    return {
+      modules: kids.map((dir) => {
+        const rel = path.relative(root, dir).replace(/\\/g, "/");
+        return {
+          id: slugId(rel),
+          path: dir,
+          label: path.basename(dir),
+          layer: applyLayer(rel, guessLayer(rel)),
+        };
+      }),
+      strategy: "feature",
+      notes: [`按功能目录聚合（${relBase} · ${kids.length} 株）`],
+    };
+  }
+
+  // single-package app: src/* top-level folders as modules when enough of them
+  const src = path.join(root, "src");
+  if (exists(src)) {
+    const kids = listDirs(src, ignore).filter((d) => {
+      const name = path.basename(d).toLowerCase();
+      return !["components", "hooks", "utils", "lib", "types", "styles", "assets"].includes(
+        name,
+      );
+    });
+    if (kids.length >= 3 && kids.length <= 24) {
+      return {
+        modules: kids.map((dir) => {
+          const rel = path.relative(root, dir).replace(/\\/g, "/");
+          return {
+            id: slugId(rel),
+            path: dir,
+            label: path.basename(dir),
+            layer: applyLayer(rel, guessLayer(rel)),
+          };
+        }),
+        strategy: "src-dir",
+        notes: [`单仓按 src 叙事目录聚合（${kids.length} 株）`],
+      };
+    }
+  }
+  return null;
+}
+
+function pickAutoStrategy(
+  root: string,
+  ignore: string[],
+  rules?: ArchitectureRules | null,
+): { modules: ModuleGraph["modules"]; strategy: string; notes: string[] } {
+  const workspaceDirs = detectWorkspaces(root);
+  if (workspaceDirs?.length) {
+    // Many packages → package narrative; few packages with rich src → feature narrative
+    if (workspaceDirs.length <= 2) {
+      const feature = discoverFeatureDirs(workspaceDirs[0]!, ignore, rules);
+      if (feature) {
+        feature.notes.unshift(
+          `workspaces 仅 ${workspaceDirs.length} 包，改用功能目录叙事`,
+        );
+        return feature;
+      }
+    }
+    return discoverPackages(root, ignore, rules);
+  }
+
+  const feature = discoverFeatureDirs(root, ignore, rules);
+  if (feature) return feature;
+  return discoverPackages(root, ignore, rules);
+}
+
 export function discoverModuleGraph(
   root: string,
   granularity: AggregateGranularity = "auto",
   ignore: string[] = DEFAULT_IGNORE,
   rules?: ArchitectureRules | null,
+  modulesMap?: FloraModulesMap | null,
 ): ModuleGraph {
   const abs = path.resolve(root);
   const rulesDoc = rules ?? loadRules(abs);
+  const map = modulesMap ?? loadModulesMap(abs);
+  const effectiveIgnore = [
+    ...ignore,
+    ...(map?.ignore ?? []).map((p) => p.replace(/\/\*\*$/, "").replace(/\*$/, "")),
+  ];
+  const effectiveGranularity =
+    granularity === "auto" && map?.granularity ? map.granularity : granularity;
+
   let discovered;
-  if (granularity === "file") {
-    discovered = discoverFiles(abs, ignore);
-  } else if (granularity === "directory") {
-    const dirs = listDirs(abs, ignore);
+  if (effectiveGranularity === "file") {
+    discovered = discoverFiles(abs, effectiveIgnore);
+  } else if (effectiveGranularity === "directory") {
+    const dirs = listDirs(abs, effectiveIgnore);
     discovered = {
       modules: dirs.map((dir) => {
         const rel = path.relative(abs, dir).replace(/\\/g, "/");
@@ -489,9 +753,9 @@ export function discoverModuleGraph(
       notes: [`强制一级目录聚合（${dirs.length}）`],
     };
     if (!discovered.modules.length) {
-      discovered = discoverPackages(abs, ignore, rulesDoc);
+      discovered = discoverPackages(abs, effectiveIgnore, rulesDoc);
     }
-  } else if (granularity === "package") {
+  } else if (effectiveGranularity === "package") {
     const ws = detectWorkspaces(abs);
     if (ws?.length) {
       discovered = {
@@ -511,19 +775,31 @@ export function discoverModuleGraph(
         notes: [`强制 package 聚合（${ws.length}）`],
       };
     } else {
-      discovered = discoverPackages(abs, ignore, rulesDoc);
+      discovered = discoverPackages(abs, effectiveIgnore, rulesDoc);
       discovered.notes.push("未找到 workspaces，回退自动策略");
     }
   } else {
-    discovered = discoverPackages(abs, ignore, rulesDoc);
+    discovered = pickAutoStrategy(abs, effectiveIgnore, rulesDoc);
   }
 
-  const { edges, notes: edgeNotes } = buildEdgesFromImports(
+  if (map) {
+    const overlay = applyModulesMap(abs, discovered.modules, map, (dir) =>
+      listDirs(dir, effectiveIgnore),
+    );
+    discovered.modules = overlay.modules;
+    discovered.notes.push(`模块地图: ${map.source ?? "flora.modules.yaml"}`);
+    discovered.notes.push(...overlay.notes);
+  }
+
+  const fromImports = buildEdgesFromImports(
     abs,
     discovered.modules,
-    ignore,
+    effectiveIgnore,
   );
-  discovered.notes.push(...edgeNotes);
+  const fromPkgs = buildEdgesFromPackageJson(discovered.modules);
+  const edges = mergeEdges(fromImports.edges, fromPkgs.edges);
+  discovered.notes.push(...fromImports.notes);
+  discovered.notes.push(...fromPkgs.notes);
   discovered.notes.push(`解析依赖边 ${edges.length}`);
   return {
     modules: discovered.modules,

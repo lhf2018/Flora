@@ -10,6 +10,9 @@ layers:
     paths:
       - packages/web/**
 
+# 声明分层后会自动加厚常见禁令（domain→infra、ui→infra 等）
+preferEntryOnly: true
+
 forbidden:
   - from: domain
     to: application
@@ -19,6 +22,18 @@ forbidden:
     to: ui
     message: "domain 不得依赖 ui"
     severity: error
+  - from: ui
+    to: domain
+    message: "ui 应经 application 访问 domain（示例）"
+    severity: warn
+  - when: entry-only
+    message: "跨包须经公开入口，禁止深入 src 内部"
+    severity: warn
   - when: cycle
     message: "禁止循环依赖"
+    severity: error
+  - import:
+      - "**/internal/**"
+      - "**/private/**"
+    message: "禁止引用 internal/private 路径"
     severity: error

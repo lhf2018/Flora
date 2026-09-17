@@ -41,8 +41,27 @@ export {
   applyArchitectureRules,
   loadRules,
   parseRulesYaml,
+  thickenRules,
 } from "./rules.js";
 export type { ArchitectureRules, ForbiddenRule, RuleLayer } from "./rules.js";
+export {
+  applyModulesMap,
+  loadModulesMap,
+  parseModulesYaml,
+} from "./modules-map.js";
+export type {
+  FloraModulesMap,
+  ModuleMergeSpec,
+  ModuleSplitSpec,
+} from "./modules-map.js";
+export {
+  collectWorkspaceDeclaredDependents,
+  computeStructureFlags,
+  diffusePollutions,
+  looksLikeAppOrEntry,
+  looksLikeSharedOrUiKit,
+  structureViolations,
+} from "./structure.js";
 export {
   appendTimelineFrame,
   buildTimeline,

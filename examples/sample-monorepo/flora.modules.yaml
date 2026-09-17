@@ -1,0 +1,18 @@
+# 可纠错模块地图：覆盖自动发现的合并 / 拆分 / 忽略
+# granularity: package
+
+ignore: []
+
+# 示例：若要把多个目录合成一株，取消注释
+# merge:
+#   - id: wallet
+#     label: wallet
+#     paths:
+#       - packages/py_wallet/**
+#     layer: application
+
+# 示例：把过大的包拆成子目录植株
+# split:
+#   - path: packages/web
+#     depth: 1
+#     layer: ui

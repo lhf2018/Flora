@@ -1,4 +1,5 @@
 import type { PlantState, Violation } from "./types.js";
+import type { StructureFlags } from "./structure.js";
 
 export interface StateInput {
   coverage: number | null; // null = unknown
@@ -6,6 +7,7 @@ export interface StateInput {
   churn: number;
   inCycle: boolean;
   violations: Violation[];
+  structure?: StructureFlags;
 }
 
 const COVERAGE_HEALTHY = 0.6;
@@ -14,7 +16,15 @@ const COUPLING_HIGH = 0.75;
 const CHURN_BLOOM = 0.55;
 
 export function derivePlantState(input: StateInput): PlantState {
+  const s = input.structure;
+
   if (input.inCycle || input.coupling >= COUPLING_HIGH) {
+    return "entangled";
+  }
+  if (s?.godModule && input.coupling >= 0.55) {
+    return "entangled";
+  }
+  if (s?.stableDependencyViolator && input.coupling >= 0.5) {
     return "entangled";
   }
 
@@ -26,10 +36,16 @@ export function derivePlantState(input: StateInput): PlantState {
     if (input.coverage < COVERAGE_HEALTHY) return "wilting";
   }
 
+  if (s?.orphan) return "wilting";
+  if (s?.hotCore && (input.coverage === null || input.coverage < 0.7)) {
+    return "wilting";
+  }
+
   if (
     (input.coverage === null || input.coverage >= COVERAGE_HEALTHY) &&
     input.churn >= CHURN_BLOOM &&
-    !input.violations.length
+    !input.violations.length &&
+    !s?.godModule
   ) {
     return "blooming";
   }
@@ -39,7 +55,12 @@ export function derivePlantState(input: StateInput): PlantState {
 
 export function healthScore(
   state: PlantState,
-  metrics: { coverage: number; coupling: number; coverageKnown: boolean },
+  metrics: {
+    coverage: number;
+    coupling: number;
+    coverageKnown: boolean;
+    instability?: number;
+  },
 ): number {
   const base: Record<PlantState, number> = {
     blooming: 0.92,
@@ -50,5 +71,9 @@ export function healthScore(
   };
   const cov = metrics.coverageKnown ? metrics.coverage : 0.6;
   const coupPenalty = metrics.coupling * 0.25;
-  return Math.max(0, Math.min(1, base[state] * 0.65 + cov * 0.35 - coupPenalty));
+  const instPenalty = (metrics.instability ?? 0.5) * 0.08;
+  return Math.max(
+    0,
+    Math.min(1, base[state] * 0.65 + cov * 0.35 - coupPenalty - instPenalty),
+  );
 }

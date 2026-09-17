@@ -6,7 +6,8 @@
 
 ```
 sample-monorepo/
-├── flora.rules.yaml          # domain / application / ui 分层 + 禁循环
+├── flora.rules.yaml          # 分层 + 加厚禁令 + entry-only
+├── flora.modules.yaml        # 可选模块地图
 ├── package.json              # pnpm/npm workspaces
 └── packages/
     ├── domain/               # 被 order/payment 依赖；规则上不应依赖上层
@@ -20,8 +21,8 @@ sample-monorepo/
 
 - 约 **5** 株植物（4 个 JS workspace + 1 个 Python）  
 - **循环藤**：order ↔ payment ↔ domain  
-- **违规藤**：跨层 forbidden（若规则命中）  
-- 多语言笔记中会出现 `javascript` / `python` Adapter  
+- **违规藤** + **污染扩散**；notes 含结构腐化 / 规则加厚  
+- Adapter：`javascript` / `python`  
 
 ## 怎么跑
 

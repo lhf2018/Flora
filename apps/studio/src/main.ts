@@ -418,6 +418,15 @@ function showPlant(plant: Plant | null, sourceSnapshot?: GardenSnapshot | null) 
       <div><b>${plant.metrics.fanIn}</b><span>被依赖</span></div>
       <div><b>${plant.metrics.fanOut}</b><span>依赖出</span></div>
     </div>
+    ${
+      plant.metrics.instability != null
+        ? `<div class="species-line">不稳定性 I · ${Math.round(plant.metrics.instability * 100)}%${
+            plant.metrics.godModule ? " · 上帝模块" : ""
+          }${plant.metrics.orphan ? " · 孤儿" : ""}${
+            plant.metrics.hotCore ? " · 热点核心" : ""
+          }</div>`
+        : ""
+    }
 
     <div class="violations">${
       plant.violations.length

@@ -34,7 +34,8 @@ pnpm --filter @flora/cli start analyze G:/code/my-app
 pnpm --filter @flora/cli start analyze G:/code/my-app -- -g package --rules flora.rules.yaml
 ```
 
-规则自动查找顺序：`flora.rules.yaml` / `.yml` / `.json` / `.flora/rules.yaml`。
+规则自动查找顺序：`flora.rules.yaml` / `.yml` / `.json` / `.flora/rules.yaml`。  
+模块地图自动查找：`flora.modules.yaml` 等（见 [CONFIG.md](./CONFIG.md)）。
 
 ### `timeline`
 
@@ -183,7 +184,7 @@ Base：`http://127.0.0.1:<port>`（CORS 已放开，供本地页调用）。
 {
   "diff": {
     "baseRef": "main",
-    "headRef": "HEAD",
+    "headRef": "feature/x",
     "base": { "...snapshot..." },
     "head": { "...snapshot..." },
     "summary": "…",
@@ -212,8 +213,10 @@ Base：`http://127.0.0.1:<port>`（CORS 已放开，供本地页调用）。
 |---|---|
 | `analyze` | 单次分析 → Snapshot |
 | `buildTimeline` / `loadTimeline` | 时间轴 |
-| `compareRefs` / `diffGardens` / `formatDiffComment` | PR 对比 |
-| `analyzeAtRef` | 指定 git ref 分析 |
+| `compareRefs` / `diffGardens` / `formatDiffComment` / `listGitBranches` | PR 对比 |
+| `analyzeAtRef` | 指定 git ref / 分支 tip 分析 |
+| `loadRules` / `loadModulesMap` | 规则与模块地图 |
+| `computeStructureFlags` / `diffusePollutions` | 结构腐化与污染扩散 |
 | `ALL_ADAPTERS` | 多语言解析器 |
 
 `@flora/render`：

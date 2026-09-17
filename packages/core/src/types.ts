@@ -46,6 +46,12 @@ export interface PlantMetrics {
   importWeight: number;
   /** health 0..1 derived from state + metrics */
   health: number;
+  /** Martin instability I = fanOut/(fanIn+fanOut) */
+  instability?: number;
+  /** structural smell flags */
+  godModule?: boolean;
+  orphan?: boolean;
+  hotCore?: boolean;
 }
 
 export interface DependencyRef {
@@ -155,7 +161,14 @@ export interface GardenTimeline {
 
 export interface ModuleGraph {
   modules: Array<{ id: string; path: string; label?: string; layer?: string }>;
-  edges: Array<{ from: string; to: string; weight?: number }>;
+  edges: Array<{
+    from: string;
+    to: string;
+    weight?: number;
+    /** resolved past package public entry */
+    deep?: boolean;
+    importSpecs?: string[];
+  }>;
   strategy: string;
   notes: string[];
 }
@@ -171,6 +184,7 @@ export interface AnalyzeOptions {
   layoutCachePath?: string;
   writeSnapshot?: boolean;
   rulesPath?: string;
+  modulesMapPath?: string;
   /** append snapshot into .flora timeline history */
   appendTimeline?: boolean;
 }

@@ -34,11 +34,11 @@ pnpm dev:studio     # Vite 热更新；分析 API 仍需 `pnpm studio` 或自接
 ### 2.1 长出今日花园
 
 1. 点 **浏览文件夹…**，进入目标仓库根目录后点 **选择此文件夹**（也可粘贴绝对路径）  
-2. 选聚合粒度（默认 **自动**）：workspaces → 多语言包 → 一级目录  
+2. 选聚合粒度（默认 **自动**：workspaces / 功能目录叙事 / 一级目录；可被 `flora.modules.yaml` 覆盖）  
 3. 点 **开始生长**  
 4. 左侧看分析摘要 / 热点 / 模块列表；画布上点植物打开诊断抽屉  
 
-产物写在目标仓库的 `.flora/snapshot.json`。
+产物写在目标仓库的 `.flora/snapshot.json`。notes 里会列出规则、模块地图、污染扩散、结构腐化等。
 
 ### 2.2 时间轴回放
 
@@ -53,10 +53,14 @@ pnpm dev:studio     # Vite 热更新；分析 API 仍需 `pnpm studio` 或自接
 
 1. 选择/生长项目后，侧栏会自动拉取分支列表  
 2. 用下拉框选 **Base 分支** 与 **Head 分支**（默认多为 `main` → 当前分支）  
-3. 点 **对比双花园** → 左右并排；变差/新增/移除会高亮  
+3. 点 **对比双花园** → 左右并排铺满舞台；变差/新增/移除会高亮  
 4. **刷新分支** 可重新读取；**退出对比** 回到单花园  
 
-CLI：`flora compare <path> --base main --head feature/x`
+CLI：
+
+```bash
+pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feature/x --comment
+```
 
 ---
 
@@ -66,85 +70,63 @@ CLI：`flora compare <path> --base main --head feature/x`
 |---|---|
 | 绿色植株 | 健康 |
 | 粉色花点 / 花丛色 | 开花（健康且近期活跃） |
-| 褐黄 | 枯萎（如覆盖率偏低） |
-| 灰白缩小 | 濒死 |
-| 根须缠绕 | 循环依赖或严重耦合 / 跨层 error |
+| 褐黄 | 枯萎（覆盖率偏低、孤儿、热点核心等） |
+| 灰白缩小 | 濒死（严重违规等） |
+| 根须缠绕 | 循环、过高耦合、上帝模块/不稳定依赖 |
 | 紫色虚线藤 | 循环依赖 |
-| 偏红违规藤 | 架构规则禁止的跨层依赖 |
-| 地面暗斑 | 污染（严重违规 epicenter） |
+| 偏红违规藤 | 跨层 / entry-only / import 黑名单等 |
+| 地面暗斑 | 污染源及**沿藤扩散**的次生污染 |
 
-点选一株后：相关藤加粗，其余淡出；抽屉里可看健康度、耦合、扇入扇出、违规与双向依赖。
+点选一株后：相关藤加粗，其余淡出。抽屉里可看：
+
+- 健康度 / 覆盖率 / 耦合 / 活跃度  
+- 扇入扇出、文件与行数  
+- **不稳定性 I**、上帝模块 / 孤儿 / 热点核心标记  
+- 违规列表与双向依赖  
+
+左侧「问题热点」会优先列出上帝模块、孤儿、缠绕与枯萎。
 
 ---
 
 ## 4. CLI 常用命令
 
-在仓库根执行（路径请用绝对路径，或先 `cd` 到目标仓）：
+路径请用**绝对路径**（`pnpm --filter` 时 cwd 多为 `packages/cli`）：
 
 ```bash
-# Studio
 pnpm studio
 
-# 分析
 pnpm --filter @flora/cli start analyze G:/code/my-app
 pnpm --filter @flora/cli start analyze G:/code/my-app -- --rules flora.rules.yaml -g package
 
-# 时间轴（需 git）
 pnpm --filter @flora/cli start timeline G:/code/my-app -- --days 30 --frames 12
 
-# PR 对比（需 git）
-pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --comment
+pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feature/x --comment
 ```
 
 完整参数见 [CLI.md](./CLI.md)。
 
 ---
 
-## 5. 架构规则（可选）
+## 5. 配置（可选）
 
-在仓库根放 `flora.rules.yaml`（analyze 会自动加载）：
+| 文件 | 作用 |
+|---|---|
+| `flora.rules.yaml` | 分层、禁止边、入口约束、import 黑名单；声明 layers 会**自动加厚** |
+| `flora.modules.yaml` | 合并 / 拆分 / 忽略模块，或强制粒度 |
 
-```yaml
-layers:
-  - name: domain
-    paths: ["packages/domain/**"]
-  - name: application
-    paths: ["packages/order/**", "packages/payment/**"]
-  - name: ui
-    paths: ["packages/web/**"]
-
-forbidden:
-  - from: domain
-    to: application
-    message: "domain 不得依赖 application"
-    severity: error
-  - when: cycle
-    message: "禁止循环依赖"
-    severity: error
-```
-
-无配置文件时默认仍禁止循环依赖。完整说明见技术方案 §5.2。
+完整语法与示例见 [CONFIG.md](./CONFIG.md)。
 
 ---
 
 ## 6. 示例仓
 
-`examples/sample-monorepo` 含：
-
-- npm workspaces（domain / order / payment / web）  
-- 故意的循环依赖与跨层违规  
-- Python 包 `py_wallet`  
-- `flora.rules.yaml`  
+`examples/sample-monorepo` 含 workspaces、故意循环、跨层规则、Python 包、模块地图。
 
 ```bash
 pnpm analyze:sample
-# 或
-pnpm --filter @flora/cli start analyze ../../examples/sample-monorepo
 ```
 
-在 Studio 里浏览到 `…/Flora/examples/sample-monorepo` 点生长，应看到约 5 株植物、循环藤与违规藤。
-
-更多说明见 [examples/sample-monorepo/README.md](../examples/sample-monorepo/README.md)。
+预期约 5 株、循环藤、违规藤、污染扩散；notes 含规则加厚 / 结构腐化。详见 [示例说明](../examples/sample-monorepo/README.md)。
 
 ---
 
@@ -154,29 +136,32 @@ pnpm --filter @flora/cli start analyze ../../examples/sample-monorepo
 
 ```
 .flora/
-  snapshot.json       # 最新花园
-  timeline.json       # 时间轴索引（若生成）
-  layout-cache.json   # 布局缓存（大图）
-  history/            # 按日快照
+  snapshot.json
+  timeline.json
+  layout-cache.json
+  history/
 ```
 
-本机「最近项目」列表在用户目录 `~/.flora/recent.json`（Windows：`%USERPROFILE%\.flora\recent.json`）。
+本机最近项目：`~/.flora/recent.json`（Windows：`%USERPROFILE%\.flora\recent.json`）。
 
 ---
 
 ## 8. 常见问题
 
-**路径不对 / 只有 1 株植物**  
-相对路径是相对 CLI 进程 cwd（`pnpm --filter` 时多为 `packages/cli`）。优先用绝对路径，或在 Studio 里用浏览选择。
+**路径不对 / 只有 1 株**  
+用绝对路径，或 Studio 内浏览选择。
 
-**对比失败：无法解析 git ref**  
-目标目录需是 git 仓库，且 Base ref 存在（试 `main`、`master`、`origin/main`）。
+**对比失败**  
+目录需是 git 仓库；下拉框选两个不同分支。可用「刷新分支」。
 
 **依赖边偏少**  
-外部 npm / 标准库引用会被忽略（避免假藤）。工作区内请用相对路径、workspace 包名或 `tsconfig` paths。
+外部 npm / 标准库会忽略；`import type` 不计入耦合。workspace 内会用 `package.json` 声明依赖补软边。仍缺边时检查是否用了相对路径、workspace 包名或 tsconfig paths。
 
-**时间轴不像真实历史**  
-当前是「出生日期 + 活跃度」的近似演化，不是逐 commit checkout。真历史对比请用 **双花园 compare**。
+**植株边界不对**  
+写 `flora.modules.yaml` 做 merge/split/ignore，或改 Studio 粒度。
 
-**Studio 页面很简陋**  
-先 `pnpm build`（至少构建 `@flora/studio`），再 `pnpm studio`。未构建时 CLI 会提供降级页。
+**时间轴不像真历史**  
+当前是出生/活跃度近似；真分支对比用双花园。
+
+**Studio 很简陋**  
+先 `pnpm build`，再 `pnpm studio`。

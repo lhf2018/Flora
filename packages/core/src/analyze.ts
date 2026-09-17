@@ -8,6 +8,13 @@ import { computeLayout, loadLayoutCache, saveLayoutCache } from "./layout.js";
 import { derivePlantState, healthScore } from "./state.js";
 import { measureModuleSize } from "./size.js";
 import { applyArchitectureRules, loadRules } from "./rules.js";
+import { loadModulesMap } from "./modules-map.js";
+import {
+  collectWorkspaceDeclaredDependents,
+  computeStructureFlags,
+  diffusePollutions,
+  structureViolations,
+} from "./structure.js";
 import { writeJson } from "./fs.js";
 import type {
   AnalyzeOptions,
@@ -16,7 +23,6 @@ import type {
   GardenSnapshot,
   Plant,
   PlantState,
-  Pollution,
   Vine,
   Violation,
 } from "./types.js";
@@ -92,19 +98,34 @@ function buildReport(plants: Plant[], vines: Vine[], cycles: string[][]): Garden
 
   const hotspots: GardenReport["hotspots"] = [];
   for (const p of plants) {
-    if (p.state === "entangled") {
+    if (p.metrics.godModule) {
+      hotspots.push({
+        id: p.id,
+        label: p.label,
+        reason: "上帝模块（扇入/体量过大）",
+      });
+    } else if (p.metrics.orphan) {
+      hotspots.push({
+        id: p.id,
+        label: p.label,
+        reason: "疑似孤儿模块",
+      });
+    } else if (p.state === "entangled") {
       hotspots.push({
         id: p.id,
         label: p.label,
         reason: p.cycleWith.length
           ? `循环依赖（与 ${p.cycleWith.map((id) => labelOf.get(id) ?? id).join(", ")}）`
-          : "耦合过高",
+          : p.violations.find((v) => v.ruleId.includes("instability"))?.message ??
+            "结构不稳定 / 耦合过高",
       });
     } else if (p.state === "dying" || p.state === "wilting") {
       hotspots.push({
         id: p.id,
         label: p.label,
-        reason: STATE_LABELS[p.state],
+        reason:
+          p.violations[0]?.message ??
+          (p.metrics.hotCore ? "热点核心" : STATE_LABELS[p.state]),
       });
     }
   }
@@ -121,7 +142,7 @@ function buildReport(plants: Plant[], vines: Vine[], cycles: string[][]): Garden
     cycles: cycleReports,
     stateCounts,
     topCoupled,
-    hotspots: hotspots.slice(0, 8),
+    hotspots: hotspots.slice(0, 10),
     totalFiles: plants.reduce((s, p) => s + p.metrics.fileCount, 0),
     totalLoc: plants.reduce((s, p) => s + p.metrics.loc, 0),
     avgHealth,
@@ -135,7 +156,14 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
   const notes: string[] = [];
 
   const rules = loadRules(rootPath, options.rulesPath);
-  const graph = discoverModuleGraph(rootPath, granularity, ignore, rules);
+  const modulesMap = loadModulesMap(rootPath, options.modulesMapPath);
+  const graph = discoverModuleGraph(
+    rootPath,
+    granularity,
+    ignore,
+    rules,
+    modulesMap,
+  );
   notes.push(...graph.notes);
 
   const coverageMap = loadCoverageByPath(rootPath, options.coveragePath);
@@ -155,7 +183,6 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
   const cycleMembersOf = new Map<string, string[]>();
 
   cycles.forEach((comp, idx) => {
-    const gid = `cycle-${idx}`;
     for (const n of comp) {
       cycleNodes.add(n);
       cycleMembersOf.set(
@@ -168,7 +195,7 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
         cycleEdgeKeys.add(`${e.from}→${e.to}`);
       }
     }
-    void gid;
+    void idx;
   });
   if (cycles.length) {
     notes.push(
@@ -190,7 +217,6 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
   let maxWeight = 1;
   for (const e of graph.edges) maxWeight = Math.max(maxWeight, e.weight ?? 1);
 
-  // provisional plants for layer lookup in rules
   const provisionalPlants: Plant[] = graph.modules.map((m) => ({
     id: m.id,
     label: m.label ?? m.id,
@@ -240,6 +266,12 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
     vines,
     rules: rules!,
     cycleEdgeKeys,
+    edgeMeta: graph.edges.map((e) => ({
+      from: e.from,
+      to: e.to,
+      deep: e.deep,
+      importSpecs: e.importSpecs,
+    })),
   });
   notes.push(...ruled.notes);
 
@@ -256,22 +288,45 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
     };
   });
 
+  const moduleCount = graph.modules.length;
+  const declaredDependents = collectWorkspaceDeclaredDependents(graph.modules);
+  if (declaredDependents.size) {
+    notes.push(
+      `workspace package.json 声明依赖覆盖 ${declaredDependents.size} 个模块（用于纠孤儿误报）`,
+    );
+  }
+
   const plants: Plant[] = graph.modules.map((m) => {
     const cov = coverageForModule(m.path, coverageMap);
     const { fanIn, fanOut, outWeight } = degreeStats(m.id, graph.edges);
-    const coupling = couplingScore(fanIn, fanOut, graph.modules.length);
+    const coupling = couplingScore(fanIn, fanOut, moduleCount);
     const churn = churnMap.get(m.path) ?? 0;
     const size = measureModuleSize(m.path, ignore, m.layer);
     const inCycle = cycleNodes.has(m.id);
     const cycleWith = cycleMembersOf.get(m.id) ?? [];
+    const structure = computeStructureFlags({
+      fanIn,
+      fanOut,
+      loc: size.loc,
+      fileCount: size.fileCount,
+      churn,
+      moduleCount,
+      label: m.label ?? m.id,
+      path: path.relative(rootPath, m.path).replace(/\\/g, "/") || ".",
+      layer: m.layer,
+      species: size.species,
+      declaredDependent: declaredDependents.has(m.id),
+    });
+
     const violations: Violation[] = [
       ...(ruled.plantViolations.get(m.id) ?? []),
+      ...structureViolations(structure, m.label ?? m.id),
     ];
-    // dedupe by ruleId
     const seen = new Set<string>();
     const uniqueViolations = violations.filter((v) => {
-      if (seen.has(v.ruleId)) return false;
-      seen.add(v.ruleId);
+      const k = `${v.ruleId}:${v.message}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
       return true;
     });
 
@@ -304,6 +359,7 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
       churn,
       inCycle: inCycle || hasIllegal,
       violations: uniqueViolations,
+      structure,
     });
 
     const metrics = {
@@ -318,6 +374,10 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
       fanOut,
       importWeight: outWeight,
       health: 0,
+      instability: structure.instability,
+      godModule: structure.godModule,
+      orphan: structure.orphan,
+      hotCore: structure.hotCore,
     };
     metrics.health = healthScore(state, metrics);
 
@@ -337,14 +397,36 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
     };
   });
 
-  const pollutions: Pollution[] = plants
+  const epicenters = plants
     .filter((p) => p.violations.some((v) => v.severity === "error"))
     .map((p) => ({
-      epicenter: p.id,
-      radius: 140,
-      intensity: 0.6,
-      reason: p.violations[0]?.message ?? "violation",
+      id: p.id,
+      reason: p.violations.find((v) => v.severity === "error")?.message ?? "violation",
+      intensity: p.state === "dying" || p.state === "entangled" ? 0.8 : 0.65,
     }));
+
+  // also seed from god modules lightly
+  for (const p of plants) {
+    if (p.metrics.godModule && !epicenters.some((e) => e.id === p.id)) {
+      epicenters.push({
+        id: p.id,
+        reason: "上帝模块结构腐化",
+        intensity: 0.5,
+      });
+    }
+  }
+
+  const pollutions = diffusePollutions(plants, vines, epicenters);
+  if (pollutions.length > epicenters.length) {
+    notes.push(
+      `污染扩散 ${pollutions.length} 处（源 ${epicenters.length}）`,
+    );
+  }
+
+  const structCount = plants.filter(
+    (p) => p.metrics.godModule || p.metrics.orphan || p.metrics.hotCore,
+  ).length;
+  if (structCount) notes.push(`结构腐化标记 ${structCount} 株`);
 
   const report = buildReport(plants, vines, cycles);
   notes.push(
@@ -353,8 +435,7 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
 
   const cachePath =
     options.layoutCachePath ?? path.join(rootPath, ".flora", "layout-cache.json");
-  const cache =
-    plants.length <= 24 ? null : loadLayoutCache(cachePath);
+  const cache = plants.length <= 24 ? null : loadLayoutCache(cachePath);
   const layout = computeLayout(plants, vines, cache);
   saveLayoutCache(cachePath, layout);
   notes.push("布局完成");
@@ -403,5 +484,7 @@ export function summarizeDelta(snapshot: GardenSnapshot): string {
   if (r.stateCounts.wilting) parts.push(`枯萎 ${r.stateCounts.wilting}`);
   if (r.stateCounts.dying) parts.push(`濒死 ${r.stateCounts.dying}`);
   if (r.stateCounts.blooming) parts.push(`开花 ${r.stateCounts.blooming}`);
+  const gods = snapshot.plants.filter((p) => p.metrics.godModule).length;
+  if (gods) parts.push(`上帝模块 ${gods}`);
   return parts.join(" · ");
 }

@@ -9,18 +9,22 @@
 | 能力 | 状态 | 说明 |
 |---|---|---|
 | Studio 选路径出树 | ✅ | 页面内目录浏览 + `POST /api/analyze` |
-| 情绪全景 + 诊断抽屉 | ✅ | Canvas 渲染；报告摘要 / 模块列表 / 依赖下钻 |
+| 情绪全景 + 诊断抽屉 | ✅ | Canvas；报告 / 热点 / 结构标记 / 依赖下钻 |
 | 物种造型（按语言） | ✅ | 造型=语言，颜色=健康；见 §4.4 |
-| JS/TS Adapter | ✅ | import/require + workspace 包名 |
+| JS/TS Adapter | ✅ | import/require/dynamic；跳过 type-only；包名 + paths |
 | Python / Go / JVM Adapter | ✅ | 见 §5.1；与 npm monorepo 可并存 |
-| 架构规则引擎 | ✅ | `flora.rules.yaml` 分层 + 禁止边 + 循环 |
+| 架构规则引擎 | ✅ | layers + 加厚禁令 + entry-only + import 黑名单 |
+| 模块地图 | ✅ | `flora.modules.yaml` merge/split/ignore/粒度 |
+| 结构腐化 | ✅ | 上帝模块 / 不稳定 / 热点；孤儿保守（认 package.json + 排除共享库） |
+| 污染扩散 | ✅ | 沿藤蔓 BFS 衰减 |
 | 时间轴存储 | ✅ | `.flora/history/*.json` + `timeline.json` |
 | 延时回放 UI | ✅ | Studio 底部滑条 / 生成回放 / 播放 |
 | 布局缓存 | ✅ | 小图新鲜布局，大图读缓存 |
 | tsconfig paths 别名 | ✅ | `@/` 等解析到工作区内模块 |
-| PR 双花园对比 | ✅ | `flora compare` + Studio 左右并排；worktree 分析 base |
+| workspace 声明依赖边 | ✅ | package.json deps 补全漏边；纠孤儿误报 |
+| PR 双花园对比 | ✅ | 分支 tip + Studio 下拉；`GET /api/branches` |
 | 每日推送 PNG / webhook | ❌ | 未做 |
-| Web Component / React 包 | ❌ | 渲染在 `@flora/render`，尚未封装自定义元素 |
+| Web Component / React 包 | ❌ | 尚未封装自定义元素 |
 | 覆盖率驱动枯萎 | 部分 | 有 lcov 则接入；无则不误杀 |
 
 **当前仓库结构（实际）**：
@@ -28,20 +32,21 @@
 ```
 flora/
 ├── packages/
-│   ├── core/          # 发现、多语言 Adapter、规则、时间轴、compare、analyze
+│   ├── core/          # 发现、结构腐化、规则、modules 地图、compare…
 │   ├── render/        # Canvas 花园 + 物种剪影
 │   └── cli/           # flora studio | analyze | timeline | compare
 ├── apps/
-│   └── studio/        # Studio 前端（构建产物由 CLI 托管）
+│   └── studio/
 ├── schemas/
 │   └── garden-snapshot.schema.json
 ├── docs/
-│   ├── README.md              # 文档索引
-│   ├── USER_GUIDE.md          # 用户指南
-│   ├── CLI.md                 # CLI / HTTP API
+│   ├── README.md
+│   ├── USER_GUIDE.md
+│   ├── CONFIG.md
+│   ├── CLI.md
 │   └── TECHNICAL_DESIGN.md
 └── examples/
-    └── sample-monorepo/   # JS 循环依赖 + flora.rules.yaml + py_wallet
+    └── sample-monorepo/   # rules + modules + 循环 + py_wallet
 ```
 
 ---
@@ -133,7 +138,8 @@ flora/
 - `vines[]`：from / to / weight / strength / kind(`normal|illegal|cycle`)
 - `pollutions[]`：error 违规 epicenter
 - `layout.positions`：稳定坐标（画布逻辑尺寸约 **1280×860**）
-- `report`：摘要 KPI、循环组、热点、耦合 Top
+- `report`：摘要 KPI、循环组、热点（含结构腐化）、耦合 Top  
+- plant `metrics` 可选：`instability` / `godModule` / `orphan` / `hotCore`  
 
 ### 4.1b `GardenDiff`（PR 对比）
 
@@ -216,57 +222,45 @@ interface FrameDelta {
 
 **模块发现顺序（auto）**：
 
-1. npm / pnpm workspaces  
-2. 额外扫描并存的 Python 包（`pyproject.toml` / `__init__.py`）与 Go module  
-3. 否则一级目录；再否则整仓一株  
+1. 若存在 `flora.modules.yaml` → 可强制 granularity / merge / split / ignore  
+2. npm / pnpm workspaces（包很多 → package；仅 1–2 包且有 features 目录 → 功能叙事）  
+3. `src/features|modules|packages|domains` 或叙事向的 `src/*`  
+4. 额外扫描并存的 Python / Go  
+5. 否则一级目录；再否则整仓一株  
 
-**依赖边 Adapter**（按扩展名分发，可并存）：
+**依赖边精度**：
 
-| Adapter | 扩展名 | 提取方式 |
-|---|---|---|
-| javascript | `.ts/.tsx/.js/...` | import / export from / require；workspace 包名；**tsconfig paths** |
-| python | `.py` | `import` / `from ... import`；相对包解析 |
-| go | `.go` | `import "..."`, import 块 |
-| jvm | `.java/.kt` | `import a.b.c` |
+- 跳过 `import type` / `export type`  
+- 识别动态 `import()`  
+- 标记深入包内部的 deep import（非 index/入口）  
+- tsconfig paths + workspace 包名  
+- **workspace `package.json` 声明依赖**补成软边（前端配套库即使 import 漏解析也会连上）  
 
-实现位置：`packages/core/src/adapters.ts` + `aliases.ts`，由 `discover.ts` 统一走文件并汇总边。  
-`node:` 内置模块与明显外部包引用会被跳过，并在 notes 中统计「外部依赖引用」。
+**结构腐化**（不只依赖）：上帝模块、孤儿、不稳定性 I、热点核心；污染沿藤蔓 BFS 扩散。
 
-### 5.2 架构规则引擎
+**规则加厚**：声明 layers 后自动补常见跨层禁令；`preferEntryOnly` / `when: entry-only` / `import:` 黑名单。
 
-配置文件（自动查找）：`flora.rules.yaml` / `.yml` / `.json` / `.flora/rules.yaml`。
+### 5.2 架构规则与模块地图
 
-```yaml
-layers:
-  - name: domain
-    paths:
-      - packages/domain/**
-  - name: application
-    paths:
-      - packages/order/**
-      - packages/payment/**
-  - name: ui
-    paths:
-      - packages/web/**
+完整字段与示例见 **[CONFIG.md](./CONFIG.md)**。
 
-forbidden:
-  - from: domain
-    to: application
-    message: "domain 不得依赖 application 层"
-    severity: error
-  - when: cycle
-    message: "禁止循环依赖"
-    severity: error
-```
+**规则文件**（自动查找）：`flora.rules.yaml` / `.yml` / `.json` / `.flora/rules.yaml`。
 
-行为：
+行为摘要：
 
 - `layers.paths` 覆盖启发式 layer  
-- `forbidden` 跨层边 → `vine.kind = illegal`，植物挂 violation  
-- `when: cycle` → 循环边保持 `cycle`，参与植株记违规  
-- 无配置文件时默认仅启用「禁止循环依赖」
+- 声明 layers 后 **thickenRules** 补常见跨层禁令  
+- `forbidden` 跨层 / `import:` / `when: entry-only|deep-import|cycle` → 违规藤或循环藤  
+- 无配置文件时默认仅「禁止循环依赖」
 
-示例：`examples/sample-monorepo/flora.rules.yaml`。
+**模块地图**：`flora.modules.yaml` — `granularity` / `ignore` / `merge` / `split`，在发现之后叠加。
+
+**结构腐化与污染**（`structure.ts`）：
+
+- 指标：`instability`、`godModule`、`orphan`、`hotCore`  
+- error 违规与上帝模块为污染源，沿藤 BFS 扩散（距离 1–2 衰减）  
+
+示例：`examples/sample-monorepo/flora.rules.yaml`、`flora.modules.yaml`。
 
 ### 5.3 时间轴与延时回放
 
@@ -291,16 +285,16 @@ forbidden:
 
 **CLI / API**：
 
-- `flora compare [path] --base <ref> [--head HEAD] [--comment]`  
+- `flora compare [path] --base <branch> --head <branch> [--comment]`  
+- `GET /api/branches?rootPath=` → 下拉选项  
 - `POST /api/compare` → `{ diff, comment, summary }`  
 
 **流程**：
 
-1. `listGitBranches` → Studio 下拉框（本地 + remote，默认 base=`main`、head=当前分支）  
-2. `analyzeAtRef(branch)`：解析分支 tip commit，`git worktree add --detach` 后分析（**不是**工作区脏树；仅 `.` / `WORKTREE` 才分析脏工作区）  
-3. 将 base 中与 head 共有的 plant id 坐标对齐到 head  
-4. `diffGardens` 产出变差/好转/增删与藤蔓变化  
-5. Studio 左右双 `GardenRenderer`，`highlightIds` + 角标  
+1. `listGitBranches` → Studio 下拉（本地 + remote；默认 base≈`main`、head≈当前分支）  
+2. `analyzeAtRef(branch)`：分支 **tip commit** + 临时 worktree（非脏工作区）  
+3. 布局按 head 对齐 → `diffGardens`  
+4. 双画布高亮变差 / 新增 / 移除  
 
 详见 [CLI.md](./CLI.md) 与 [USER_GUIDE.md](./USER_GUIDE.md)。
 
@@ -310,7 +304,7 @@ forbidden:
 flora studio [--port 4173] [--no-open]
 flora analyze [path] [-g auto|package|directory|file] [--rules file]
 flora timeline [path] [-d 30] [-f 12] [-g auto]
-flora compare [path] -b <base> [-H HEAD] [-g auto] [--rules file] [--comment]
+flora compare [path] -b <base> -H <head> [-g auto] [--rules file] [--comment]
 ```
 
 pnpm 包装：
@@ -319,10 +313,10 @@ pnpm 包装：
 pnpm studio
 pnpm analyze:sample
 pnpm build
-pnpm --filter @flora/cli start compare <abs-path> -- --base main --comment
+pnpm --filter @flora/cli start compare <abs-path> -- --base main --head feature/x --comment
 ```
 
-完整参数表：[CLI.md](./CLI.md)。
+配置说明：[CONFIG.md](./CONFIG.md)。完整参数表：[CLI.md](./CLI.md)。
 
 ### 5.6 Studio 出树体验
 
@@ -359,12 +353,13 @@ pnpm --filter @flora/cli start compare <abs-path> -- --base main --comment
 
 ## 8. 配置面
 
-优先薄配置：**规则文件**即可纠正分层。完整 `flora.config.yaml` 仍为规划项；当前常用：
+优先薄配置：**规则文件 + 可选模块地图**即可纠正分层与边界。完整 `flora.config.yaml` 仍为规划项；当前常用：
 
-- `flora.rules.yaml` — 架构规则  
-- 环境/CLI 参数 — granularity、rules 路径、timeline days/frames  
+- `flora.rules.yaml` — 架构规则（见 [CONFIG.md](./CONFIG.md)）  
+- `flora.modules.yaml` — 模块地图  
+- CLI / Studio 参数 — granularity、rules 路径、timeline days/frames、compare 分支  
 
-原则：**零配置能跑，配置只用于纠正分层与规则。**
+原则：**零配置能跑，配置只用于纠正分层、边界与禁令。**
 
 ---
 
@@ -445,6 +440,6 @@ pnpm --filter @flora/cli start compare <abs-path> -- --base main --comment
 
 Flora = **可插拔分析内核**（多语言 Adapter + 规则 + 时间轴）+ **隐喻渲染**（物种造型 × 健康色）+ **Studio/CLI 交付**。
 
-已验证切口：`flora studio` 选路径出树 → 诊断 → 生成回放看生长 → PR 双花园对比。  
-本地文档入口：[docs/README.md](./README.md)。  
-下一批优先：日报静态图推送、CI Bot 挂评论、规则/解析加深。
+已验证切口：选路径出树 → 结构/规则诊断 → 回放 → 分支 tip 双花园。  
+本地文档入口：[docs/README.md](./README.md)（含 [CONFIG.md](./CONFIG.md)）。  
+下一批优先：日报推送、CI Bot、merge-base PR 语义。
