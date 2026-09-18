@@ -77,9 +77,10 @@ export function computeLayout(
     }
   }
 
-  const minDist = plants.length <= 8 ? 190 : plants.length <= 16 ? 150 : plants.length <= 28 ? 115 : 95;
+  const minDist =
+    plants.length <= 6 ? 108 : plants.length <= 12 ? 88 : plants.length <= 20 ? 72 : 60;
 
-  for (let iter = 0; iter < 100; iter++) {
+  for (let iter = 0; iter < 80; iter++) {
     for (let i = 0; i < plants.length; i++) {
       for (let j = i + 1; j < plants.length; j++) {
         const a = plants[i]!;
@@ -89,21 +90,16 @@ export function computeLayout(
         let dx = pa.x - pb.x;
         let dy = pa.y - pb.y;
         let dist = Math.hypot(dx, dy) || 0.01;
-        // prefer horizontal separation within same layer band
-        const sameBand = Math.abs(pa.y - pb.y) < 80;
-        const target = sameBand ? minDist * 1.15 : minDist;
+        const sameBand = Math.abs(pa.y - pb.y) < 70;
+        const target = sameBand ? minDist * 1.05 : minDist;
         if (dist < target) {
-          const f = ((target - dist) / dist) * 0.14;
+          const f = ((target - dist) / dist) * 0.12;
           dx *= f;
-          dy *= f * (sameBand ? 0.45 : 1);
-          if (!cache?.positions[a.id]) {
-            pa.x += dx;
-            pa.y += dy;
-          }
-          if (!cache?.positions[b.id]) {
-            pb.x -= dx;
-            pb.y -= dy;
-          }
+          dy *= f * (sameBand ? 0.4 : 1);
+          pa.x += dx;
+          pa.y += dy;
+          pb.x -= dx;
+          pb.y -= dy;
         }
       }
     }
@@ -115,26 +111,54 @@ export function computeLayout(
       const dx = pb.x - pa.x;
       const dy = pb.y - pa.y;
       const dist = Math.hypot(dx, dy) || 0.01;
-      const ideal = v.kind === "cycle" ? 260 : 230;
-      const f = ((dist - ideal) / dist) * 0.014 * (0.4 + v.strength);
-      if (!cache?.positions[v.from]) {
-        pa.x += dx * f;
-        pa.y += dy * f;
-      }
-      if (!cache?.positions[v.to]) {
-        pb.x -= dx * f;
-        pb.y -= dy * f;
-      }
+      const ideal = v.kind === "cycle" ? 140 : 118;
+      const f = ((dist - ideal) / dist) * 0.02 * (0.35 + v.strength);
+      pa.x += dx * f;
+      pa.y += dy * f;
+      pb.x -= dx * f;
+      pb.y -= dy * f;
     }
   }
 
-  for (const id of Object.keys(positions)) {
-    const p = positions[id]!;
-    p.x = Math.min(WIDTH - 80, Math.max(80, p.x));
-    p.y = Math.min(HEIGHT - 80, Math.max(80, p.y));
-  }
+  fitInside(positions);
 
   return { positions, width: WIDTH, height: HEIGHT };
+}
+
+/** Pull the garden into a padded frame so labels stay inside and off the legend. */
+function fitInside(positions: Record<string, { x: number; y: number }>) {
+  const ids = Object.keys(positions);
+  if (!ids.length) return;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const id of ids) {
+    const p = positions[id]!;
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  // room for legend (top), name plates (bottom), and side labels
+  const padL = 150;
+  const padR = 110;
+  const padT = 150;
+  const padB = 140;
+  const destW = WIDTH - padL - padR;
+  const destH = HEIGHT - padT - padB;
+  const bw = Math.max(40, maxX - minX);
+  const bh = Math.max(40, maxY - minY);
+  const scale = Math.min(1, destW / bw, destH / bh);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const dcx = padL + destW / 2;
+  const dcy = padT + destH / 2;
+  for (const id of ids) {
+    const p = positions[id]!;
+    p.x = dcx + (p.x - cx) * scale;
+    p.y = dcy + (p.y - cy) * scale;
+  }
 }
 
 export function loadLayoutCache(filePath: string): LayoutCache | null {

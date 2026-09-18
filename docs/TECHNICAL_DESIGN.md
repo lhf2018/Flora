@@ -8,16 +8,19 @@
 
 | 能力 | 状态 | 说明 |
 |---|---|---|
-| Studio 选路径出树 | ✅ | 页面内目录浏览 + `POST /api/analyze` |
-| 情绪全景 + 诊断抽屉 | ✅ | Canvas；报告 / 热点 / 结构标记 / 依赖下钻 |
+| Studio 选路径出树 | ✅ | 页内浏览 + `POST /api/analyze` |
+| 情绪全景 + 诊断抽屉 | ✅ | Canvas；报告 / 热点 / 结构标记 |
+| 点株下钻 | ✅ | `focusPath` + 面包屑；子路径再分析 |
+| 叙事目标株数 | ✅ | 默认约 12；过少下钻；过多按父目录成簇，ui 株优先留 |
 | 物种造型（按语言） | ✅ | 造型=语言，颜色=健康；见 §4.4 |
 | JS/TS Adapter | ✅ | import/require/dynamic；跳过 type-only；包名 + paths |
-| Python / Go / JVM Adapter | ✅ | 见 §5.1；与 npm monorepo 可并存 |
+| Python / Go / JVM Adapter | ✅ | 见 §5.1；Maven 反应器与 npm 仓可并存 |
+| 混合仓叙事 | ✅ | 静态前端单独成株；文件粒度按语言封顶，避免一种语言占满 |
 | 架构规则引擎 | ✅ | layers + 加厚禁令 + entry-only + import 黑名单 |
 | 模块地图 | ✅ | `flora.modules.yaml` merge/split/ignore/粒度 |
 | 结构腐化 | ✅ | 上帝模块 / 不稳定 / 热点；孤儿保守（认 package.json + 排除共享库） |
 | 污染扩散 | ✅ | 沿藤蔓 BFS 衰减 |
-| 时间轴存储 | ✅ | `.flora/history/*.json` + `timeline.json` |
+| 时间轴 | ✅ | 优先提交 worktree 切片；`--approx` 回退 |
 | 延时回放 UI | ✅ | Studio 底部滑条 / 生成回放 / 播放 |
 | 布局缓存 | ✅ | 小图新鲜布局，大图读缓存 |
 | tsconfig paths 别名 | ✅ | `@/` 等解析到工作区内模块 |
@@ -73,12 +76,12 @@ flora/
 ┌─────────────────────────────────────────┐
 │  Flora Studio                           │
 │     [ 浏览文件夹… ]  或粘贴路径          │
-│     聚合粒度 · 开始生长                  │
-│     Base/Head · 对比双花园               │
+│     聚合粒度 · 叙事株数 · 开始生长       │
+│     下钻面包屑 · Base/Head · 双花园      │
 │     分析摘要 / 模块列表 / 最近项目        │
 └─────────────────────────────────────────┘
         ↓
-   全景花园 + 诊断抽屉
+   全景花园 + 诊断抽屉（可下钻）
    （对比模式：左右双画布）
         ↓
    时间轴：◀ 滑条 ▶  [回放]  [生成回放]
@@ -120,7 +123,7 @@ flora/
 
 ```
 选路径 → analyze（别名 + 多语言边 + 规则）→ Snapshot
-      → 可选 buildTimeline（git 出生/活跃度切片）
+      → 可选 buildTimeline（提交 worktree 优先，approx 回退）
       → 可选 compareRefs（worktree 分析 base ↔ head）
       → Studio 渲染 / 回放 / 双花园
 ```
@@ -223,10 +226,21 @@ interface FrameDelta {
 **模块发现顺序（auto）**：
 
 1. 若存在 `flora.modules.yaml` → 可强制 granularity / merge / split / ignore  
-2. npm / pnpm workspaces（包很多 → package；仅 1–2 包且有 features 目录 → 功能叙事）  
-3. `src/features|modules|packages|domains` 或叙事向的 `src/*`  
-4. 额外扫描并存的 Python / Go  
-5. 否则一级目录；再否则整仓一株  
+2. npm / pnpm workspaces：包多 → package；**包少（≤3）或总株数 &lt; 目标 → 自动下钻**到 `src/*` / features / 包内一级目录；扁平 `src/*.ts`（以及 `.py` / `.go` / `.java`）→ **按文件成株**。名为 `src` / `lib` / `app` 的容器会再展开，标签去掉这层目录名  
+3. **Maven / Gradle 反应器**（根上 ≥2 个子模块）：子模块各一株，并带上同级 `package.json` 前端包，以及各模块 `src/main/resources/static/<app>`（有 js/html 才算）。这样 Java 仓不会把页面吃掉，也不会只剩枫树  
+4. 下钻单个 JVM 模块：从 `src/main/java|kotlin` 起，跳过只有一个子目录的包前缀（`com` / `lhf` …），停在第一个分叉或源文件层。模块根上的静态前端仍作为 `ui` 株留下  
+5. **叙事目标株数**（默认 12，可调 4–36）：过少继续下钻；过多按**父目录**成簇，而不是收成一棵「其余」。不把仓库根、`static` / `resources` 整组合并（否则簇路径会吞掉别的株）。兜底折叠时 **ui 株优先保留**  
+6. 再否则：Python / Go、功能目录、一级目录；最后整仓一株  
+
+**文件粒度**：扫描含 `.java` / `.kt` 在内的源码，跳过 `src/test`。人数最多的语言封顶 24，其余语言最多 40，并按一级目录轮转取样，避免 DFS 先扫完 Java 就把前端挤出画面。
+
+**点株下钻**：`analyze({ focusPath })` 以子路径为发现根。Studio 抽屉按钮在标题下（画布 z-index 低于抽屉），支持双击。单文件聚焦不写根快照、不追加 timeline。
+
+**布局**：力导之后 `fitInside` 收进留白框；画布视口上留图例，避免植株贴边或压住页面控件。
+
+**时间轴**：优先均匀抽样近期 git 提交，经临时 worktree 真实分析（默认并发 2，磁盘缓存 `.flora/commit-cache/`，Studio 轮询 `/api/timeline/progress`）；失败则回退出生/活跃度近似。
+
+Studio 仍可手动选 `package` / `directory` / `file` 覆盖 auto。混合仓日常用 **auto**。
 
 **依赖边精度**：
 
@@ -235,6 +249,7 @@ interface FrameDelta {
 - 标记深入包内部的 deep import（非 index/入口）  
 - tsconfig paths + workspace 包名  
 - **workspace `package.json` 声明依赖**补成软边（前端配套库即使 import 漏解析也会连上）  
+- JVM：`import com.foo.Bar` 解析到各模块 `src/main/java`（及 kotlin）下的源文件；`java.*` 等解析不到的记为外部依赖  
 
 **结构腐化**（不只依赖）：上帝模块、孤儿、不稳定性 I、热点核心；污染沿藤蔓 BFS 扩散。
 
@@ -266,64 +281,55 @@ interface FrameDelta {
 
 **写入**：
 
-- 每次 `analyze`（默认）`appendTimelineFrame` → 按日覆盖写入 history  
+- 每次根目录 `analyze`（默认）`appendTimelineFrame` → 按日覆盖 history  
+- 点株下钻（`focusPath`）**不**追加 timeline  
 - `flora timeline` / `POST /api/timeline/build` → `buildTimeline`  
 
-**`buildTimeline` 策略（无需 checkout 旧提交）**：
+**`buildTimeline` 策略**：
 
-1. 以当前 analyze 为终态  
-2. 用 git 取各模块「首次出现日期」  
-3. 在 `[now-days, now]` 均匀取样 N 帧：过滤尚未出生的模块；按窗口内 commit 数调节 churn/枯萎；前期弱化循环藤的显现  
-4. 写出 `timeline.json` + `history/*.json`  
+1. **commits（默认 auto）**：回溯窗口内按日去重后均匀抽样 N 提交；末帧用当前树，其余 `analyzeAtRef`（`ref-analyze.ts`，避免与 compare 循环依赖）+ 临时 worktree；默认并发 2；按 `sha + granularity + target` 写入 `.flora/commit-cache/`；布局尽量对齐 HEAD  
+2. **approx（`--approx` 或 commits 失败）**：当前 analyze 为终态；按出生日过滤；窗口 commit 数调节 churn/枯萎；前期弱化循环藤  
+3. 写出 `timeline.json` + `history/*.json`  
 
-**Studio**：
-
-- 底部时间轴：日期滑条、上一帧/下一帧、回放（~850ms/帧）、生成回放  
-- API：`GET /api/timeline?rootPath=`，`POST /api/timeline/build`
+**Studio**：滑条 / 回放 / 生成回放；生成中轮询 `GET /api/timeline/progress`；响应 `mode` 为 `commits` 或 `approx`。
 
 ### 5.4 PR 双花园对比
 
 **CLI / API**：
 
 - `flora compare [path] --base <branch> --head <branch> [--comment]`  
-- `GET /api/branches?rootPath=` → 下拉选项  
-- `POST /api/compare` → `{ diff, comment, summary }`  
+- `GET /api/branches?rootPath=` → 下拉  
+- `POST /api/compare` → `{ diff, comment, summary }`（可传 `targetPlants`）  
 
-**流程**：
+**流程**：`listGitBranches` → `analyzeAtRef(tip)` worktree → 布局对齐 → `diffGardens` → 双画布高亮。
 
-1. `listGitBranches` → Studio 下拉（本地 + remote；默认 base≈`main`、head≈当前分支）  
-2. `analyzeAtRef(branch)`：分支 **tip commit** + 临时 worktree（非脏工作区）  
-3. 布局按 head 对齐 → `diffGardens`  
-4. 双画布高亮变差 / 新增 / 移除  
-
-详见 [CLI.md](./CLI.md) 与 [USER_GUIDE.md](./USER_GUIDE.md)。
+详见 [CLI.md](./CLI.md)、[USER_GUIDE.md](./USER_GUIDE.md)。
 
 ### 5.5 CLI
 
 ```bash
 flora studio [--port 4173] [--no-open]
-flora analyze [path] [-g auto|package|directory|file] [--rules file]
-flora timeline [path] [-d 30] [-f 12] [-g auto]
+flora analyze [path] [-g auto|package|directory|file] [--target 12] [--rules file]
+flora timeline [path] [-d 30] [-f 8] [-g auto] [--target 12] [--approx]
 flora compare [path] -b <base> -H <head> [-g auto] [--rules file] [--comment]
 ```
-
-pnpm 包装：
 
 ```bash
 pnpm studio
 pnpm analyze:sample
-pnpm build
-pnpm --filter @flora/cli start compare <abs-path> -- --base main --head feature/x --comment
+pnpm --filter @flora/cli start analyze <abs> -- --target 12
+pnpm --filter @flora/cli start timeline <abs> -- --frames 8
+pnpm --filter @flora/cli start compare <abs> -- --base main --head feature/x --comment
 ```
 
-配置说明：[CONFIG.md](./CONFIG.md)。完整参数表：[CLI.md](./CLI.md)。
+配置：[CONFIG.md](./CONFIG.md)。参数表：[CLI.md](./CLI.md)。
 
 ### 5.6 Studio 出树体验
 
-- **页面内目录浏览**（盘符 → 进入 → 选择此文件夹）；原生系统对话框仅作降级  
-- 零配置默认：workspaces / 目录聚合 + 循环规则 + 有则挂覆盖率  
-- 结果：`.flora/snapshot.json` + 最近项目列表（`~/.flora/recent.json`）  
-- 对比模式：侧栏 Base/Head → 双画布；退出后恢复单花园与时间轴  
+- **页面内目录浏览**；原生对话框仅作降级  
+- 零配置默认：auto 叙事 + 目标株数 + 循环规则；有则挂覆盖率  
+- 点株 **下钻** + 面包屑；结果写 `.flora/snapshot.json`（下钻不覆盖根快照）  
+- 对比模式：Base/Head → 双画布；退出后恢复单花园与时间轴  
 
 ---
 
@@ -333,7 +339,7 @@ pnpm --filter @flora/cli start compare <abs-path> -- --base main --head feature/
 - 物种剪影 + 健康色；图例在画布左上（健康色一行 + 当前物种一行）  
 - 对比模式：`highlightIds` 光晕、`badges` 角标、`title` 角标标题；双画布共用布局对齐  
 - 「今日花园」状态栏与时间轴为舞台底部独立条，不叠在画布上  
-- 诊断抽屉：健康度/覆盖率/耦合/活跃度、文件与扇入扇出、违规、依赖双向列表、物种与语言占比  
+- 诊断抽屉：健康度/覆盖率/耦合/活跃度、文件与扇入扇出、违规、依赖双向列表、物种与语言占比、**下钻此株**  
 
 明确不做：全 3D、卡片 dashboard、积分游戏。
 
@@ -394,8 +400,9 @@ pnpm --filter @flora/cli start compare <abs-path> -- --base main --head feature/
 | 默认渲染 | 2D Canvas | 每日可读、可导出 |
 | 布局 | 分层 + 力导 + 条件缓存 | 位置稳定 |
 | 语言接入 | 进程内多 Adapter | 单包维护成本低于多 package |
-| 时间轴 | git 元数据切片，不 checkout | 快、可在任意脏工作区跑 |
+| 时间轴 | 提交切片优先；`--approx` 可跳过 checkout | 真演化 vs 速度可切换 |
 | PR 对比 | 临时 worktree + 布局对齐 | 真 ref 差分且不脏工作区 |
+| 叙事株数 | 发现后 fit/fold，非 yaml | Studio 滑杆即时可感 |
 | 别名 | 读 tsconfig paths | 减少 monorepo 漏边 |
 | 规则 | 自研 YAML 子集 | 无额外依赖，覆盖当前 schema |
 | 选目录 | 页内 FS API 为主 | Windows 下原生对话框不可靠 |
@@ -408,8 +415,9 @@ pnpm --filter @flora/cli start compare <abs-path> -- --base main --head feature/
 1. **可生成**：Studio 选根目录即可出花园 — ✅  
 2. **可辨认**：布局缓存 / 回放共位 — ✅ 基本满足  
 3. **可感知**：状态色 + 污染 + 循环藤 — ✅  
-4. **可下钻**：诊断抽屉 — ✅  
-5. **可传播**：回放 ✅；双花园评论体 ✅；日报图 ❌  
+4. **可下钻**：诊断抽屉 + 点株子花园 — ✅  
+5. **可调叙事**：目标株数 / 粒度 / 模块地图 — ✅  
+6. **可传播**：回放 ✅；双花园评论体 ✅；日报图 ❌  
 
 ---
 
@@ -417,12 +425,13 @@ pnpm --filter @flora/cli start compare <abs-path> -- --base main --head feature/
 
 | 风险 | 对策 |
 |---|---|
-| 大仓植物过多 | 默认 package/目录聚合；file 粒度需显式选择 |
-| 依赖解析不准 | 多 Adapter + tsconfig paths + 忽略外部包；规则纠分层；后续可加 `modules.json` |
-| 时间轴非真实 checkout | 文档标明「基于出生/活跃度的演化近似」；真对比用 compare / worktree |
+| 大仓植物过多 | 叙事目标株数按父目录成簇；或 package 粒度 / modules merge |
+| 一种语言占满画面 | auto 保留 Maven 模块与静态前端；file 按语言封顶。不要用文件粒度扫整仓 Java |
+| 依赖解析不准 | Adapter + paths + package.json 软边 + JVM 源根解析；rules 纠分层 |
+| 时间轴偏慢 / 不真 | 默认 commits worktree；`--approx` 换速度；PR 用 compare |
 | 隐喻过载 | 颜色只表健康；类型走造型 |
 | 没人打开交互页 | 下一步做推送图 |
-| Windows 相对路径易错 | 用户文档强调绝对路径；Studio 用页内浏览 |
+| Windows 相对路径易错 | 文档强调绝对路径；Studio 页内浏览 |
 
 ---
 
@@ -440,6 +449,6 @@ pnpm --filter @flora/cli start compare <abs-path> -- --base main --head feature/
 
 Flora = **可插拔分析内核**（多语言 Adapter + 规则 + 时间轴）+ **隐喻渲染**（物种造型 × 健康色）+ **Studio/CLI 交付**。
 
-已验证切口：选路径出树 → 结构/规则诊断 → 回放 → 分支 tip 双花园。  
-本地文档入口：[docs/README.md](./README.md)（含 [CONFIG.md](./CONFIG.md)）。  
+已验证切口：选路径出树 → 叙事株数 / 点株下钻 → 结构与规则诊断 → 提交切片回放 → 分支 tip 双花园。  
+本地文档入口：[docs/README.md](./README.md)。  
 下一批优先：日报推送、CI Bot、merge-base PR 语义。

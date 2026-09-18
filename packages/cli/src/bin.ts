@@ -39,50 +39,67 @@ program
     "auto | package | directory | file",
     "auto",
   )
+  .option("--target <n>", "叙事目标株数（auto，默认 12）")
   .option("--rules <file>", "架构规则文件")
-  .action(async (root: string, opts: { granularity: string; rules?: string }) => {
-    const rootPath = path.resolve(root);
-    const snapshot = await analyze({
-      rootPath,
-      granularity: opts.granularity as "auto" | "package" | "directory" | "file",
-      rulesPath: opts.rules,
-    });
-    console.log(`✓ ${snapshot.plants.length} plants, ${snapshot.vines.length} vines`);
-    console.log(`  → ${path.join(rootPath, ".flora", "snapshot.json")}`);
-    console.log(`  ${summarizeDelta(snapshot)}`);
-    for (const n of snapshot.meta.notes ?? []) console.log(`  · ${n}`);
-  });
+  .action(
+    async (
+      root: string,
+      opts: { granularity: string; rules?: string; target?: string },
+    ) => {
+      const rootPath = path.resolve(root);
+      const snapshot = await analyze({
+        rootPath,
+        granularity: opts.granularity as "auto" | "package" | "directory" | "file",
+        rulesPath: opts.rules,
+        targetPlants: opts.target ? Number(opts.target) : undefined,
+      });
+      console.log(`✓ ${snapshot.plants.length} plants, ${snapshot.vines.length} vines`);
+      console.log(`  → ${path.join(rootPath, ".flora", "snapshot.json")}`);
+      console.log(`  ${summarizeDelta(snapshot)}`);
+      for (const n of snapshot.meta.notes ?? []) console.log(`  · ${n}`);
+    },
+  );
 
 program
   .command("timeline")
   .description("根据 git 历史生成时间轴（用于延时回放）")
   .argument("[path]", "项目根路径", ".")
   .option("-d, --days <n>", "回溯天数", "30")
-  .option("-f, --frames <n>", "帧数", "12")
+  .option("-f, --frames <n>", "帧数", "8")
   .option(
     "-g, --granularity <mode>",
     "auto | package | directory | file",
     "auto",
   )
+  .option("--target <n>", "叙事目标株数")
+  .option("--approx", "强制用活跃度近似（不 checkout 提交）")
   .action(
     async (
       root: string,
-      opts: { days: string; frames: string; granularity: string },
+      opts: {
+        days: string;
+        frames: string;
+        granularity: string;
+        target?: string;
+        approx?: boolean;
+      },
     ) => {
       const rootPath = path.resolve(root);
       console.log("生成时间轴中…");
       const { timeline } = await buildTimeline({
         rootPath,
         days: Number(opts.days) || 30,
-        frames: Number(opts.frames) || 12,
+        frames: Number(opts.frames) || 8,
         granularity: opts.granularity as
           | "auto"
           | "package"
           | "directory"
           | "file",
+        targetPlants: opts.target ? Number(opts.target) : undefined,
+        mode: opts.approx ? "approx" : "auto",
       });
       console.log(
-        `✓ ${timeline.frames.length} 帧  ${timeline.range.from} → ${timeline.range.to}`,
+        `✓ ${timeline.frames.length} 帧 · ${timeline.range.from} → ${timeline.range.to}`,
       );
       console.log(`  → ${path.join(rootPath, ".flora", "timeline.json")}`);
     },

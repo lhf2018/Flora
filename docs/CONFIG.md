@@ -154,7 +154,9 @@ aliases:                 # 预留：路径别名提示（与 tsconfig paths 互�
 | 循环 | rules `when: cycle` + 图算法 | 寄生藤 + 缠绕 |
 | 上帝模块 / 孤儿 / 不稳定 / 热点 | 结构启发式 | warn + 热点；应用根/前端页**不算**孤儿 |
 | 污染扩散 | error 违规与上帝模块为源 | 沿藤 BFS 衰减暗斑 |
-| 模块边界 | modules 地图 + auto 叙事 | 植株数量与标签 |
+| 模块边界 | modules 地图 + auto 叙事 + 目标株数 | 植株数量与标签 |
+
+**叙事株数**（Studio 滑杆 / CLI `--target` / API `targetPlants`）：不属于 yaml。只在 **auto** 发现之后生效：过少则下钻，过多则把同级目录收成簇。簇名用成员名（如 `cycles · state +8`），不会叫 `src`。`ui` 层植株在兜底折叠时优先保留。Maven 多模块、Java 包、静态前端也由发现逻辑决定，不写在这份 yaml 里。
 
 **孤儿判定**（刻意保守，减少误报）：
 

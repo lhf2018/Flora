@@ -160,7 +160,14 @@ export interface GardenTimeline {
 }
 
 export interface ModuleGraph {
-  modules: Array<{ id: string; path: string; label?: string; layer?: string }>;
+  modules: Array<{
+    id: string;
+    path: string;
+    label?: string;
+    layer?: string;
+    /** narrative fold cluster — excluded from cycle detection */
+    folded?: boolean;
+  }>;
   edges: Array<{
     from: string;
     to: string;
@@ -187,6 +194,16 @@ export interface AnalyzeOptions {
   modulesMapPath?: string;
   /** append snapshot into .flora timeline history */
   appendTimeline?: boolean;
+  /**
+   * Narrative target plant count (auto granularity).
+   * Sparse gardens expand toward this; dense gardens fold extras into 「其余」.
+   */
+  targetPlants?: number;
+  /**
+   * Zoom into a subdirectory / file path (absolute or relative to rootPath).
+   * Analysis root becomes this path; snapshot still tagged with parent projectId.
+   */
+  focusPath?: string;
 }
 
 export interface LayoutCache {

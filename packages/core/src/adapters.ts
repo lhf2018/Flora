@@ -167,6 +167,70 @@ export const goAdapter: LanguageAdapter = {
   },
 };
 
+const jvmRootsCache = new Map<string, string[]>();
+
+function collectJvmSourceRoots(startFile: string): string[] {
+  let dir = path.dirname(startFile);
+  let moduleRoot: string | null = null;
+  let reactor: string | null = null;
+  for (let i = 0; i < 14; i++) {
+    const build =
+      fs.existsSync(path.join(dir, "pom.xml")) ||
+      fs.existsSync(path.join(dir, "build.gradle")) ||
+      fs.existsSync(path.join(dir, "build.gradle.kts"));
+    if (build) {
+      if (!moduleRoot) moduleRoot = dir;
+      else {
+        reactor = dir;
+        break;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  const key = reactor ?? moduleRoot ?? path.dirname(startFile);
+  const cached = jvmRootsCache.get(key);
+  if (cached) return cached;
+
+  const roots: string[] = [];
+  const add = (moduleDir: string) => {
+    for (const rel of [
+      "src/main/java",
+      "src/main/kotlin",
+      "src/test/java",
+      "src/test/kotlin",
+    ]) {
+      const p = path.join(moduleDir, rel);
+      if (fs.existsSync(p)) roots.push(p);
+    }
+  };
+  if (reactor) {
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(reactor, { withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const full = path.join(reactor, entry.name);
+      if (
+        fs.existsSync(path.join(full, "pom.xml")) ||
+        fs.existsSync(path.join(full, "build.gradle")) ||
+        fs.existsSync(path.join(full, "build.gradle.kts"))
+      ) {
+        add(full);
+      }
+    }
+    add(reactor);
+  } else if (moduleRoot) {
+    add(moduleRoot);
+  }
+  jvmRootsCache.set(key, roots);
+  return roots;
+}
+
 /** Java/Kotlin style imports */
 export const jvmAdapter: LanguageAdapter = {
   id: "jvm",
@@ -176,9 +240,29 @@ export const jvmAdapter: LanguageAdapter = {
     for (const m of source.matchAll(
       /^\s*import\s+(?:static\s+)?([a-zA-Z0-9_.]+)/gm,
     )) {
-      out.push({ spec: m[1]!, kind: "static" });
+      const spec = m[1]!.replace(/\.+$/, "");
+      if (!spec || spec.endsWith(".")) continue;
+      out.push({ spec, kind: "static" });
     }
     return out;
+  },
+  resolve(fromFile, spec, existsFn) {
+    if (!spec || spec.endsWith(".*") || spec.split(".").length < 2) return null;
+    const parts = spec.split(".");
+    const rels = [parts.join(path.sep)];
+    const last = parts[parts.length - 1] ?? "";
+    if (parts.length > 2 && /^[a-z]/.test(last)) {
+      rels.push(parts.slice(0, -1).join(path.sep));
+    }
+    for (const root of collectJvmSourceRoots(fromFile)) {
+      for (const rel of rels) {
+        for (const ext of [".java", ".kt", ".kts"]) {
+          const file = path.join(root, rel + ext);
+          if (existsFn(file)) return file;
+        }
+      }
+    }
+    return null;
   },
 };
 
@@ -205,6 +289,15 @@ export function edgeSourceExts(): Set<string> {
 export function isModuleEntryFile(moduleRoot: string, resolvedFile: string): boolean {
   const root = path.normalize(moduleRoot);
   const file = path.normalize(resolvedFile);
+  // File-as-module: the module path is the source file itself
+  if (root === file) return true;
+  try {
+    if (fs.existsSync(root) && !fs.statSync(root).isDirectory()) {
+      return root === file;
+    }
+  } catch {
+    /* ignore */
+  }
   const rel = path.relative(root, file);
   if (rel.startsWith("..")) return false;
   const base = path.basename(file).toLowerCase();

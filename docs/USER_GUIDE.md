@@ -2,7 +2,7 @@
 
 把任意代码库长成一座架构花园：模块是植物，依赖是藤蔓，违规会污染土地。
 
-- **造型** = 语言 / 文件类型（松=TS、柳=Python…）  
+- **造型** = 语言 / 文件类型（松=TS、橡=JS、柳=Python、枫=Java、花=前端）  
 - **颜色** = 健康（绿健康 · 花色开花 · 褐枯萎 · 灰濒死 · 深色缠绕）
 
 ---
@@ -13,19 +13,16 @@
 
 ```bash
 pnpm install
-pnpm build          # 构建 core / render / cli / studio
-pnpm studio         # 打开 Studio（默认 http://127.0.0.1:4173）
+pnpm build          # core / render / cli / studio
+pnpm studio         # http://127.0.0.1:4173
 ```
 
-开发 Studio 前端时可另开：
+日常「选路径出树」用 `pnpm studio` 即可。改前端时可另开：
 
 ```bash
-pnpm --filter @flora/core build
-pnpm --filter @flora/render build
-pnpm dev:studio     # Vite 热更新；分析 API 仍需 `pnpm studio` 或自接代理
+pnpm --filter @flora/core build && pnpm --filter @flora/render build
+pnpm dev:studio     # Vite 热更新；分析 API 仍需 `pnpm studio`
 ```
-
-日常「选路径出树」用 `pnpm studio` 即可（CLI 会托管已构建的 Studio 静态资源）。
 
 ---
 
@@ -33,30 +30,27 @@ pnpm dev:studio     # Vite 热更新；分析 API 仍需 `pnpm studio` 或自接
 
 ### 2.1 长出今日花园
 
-1. 点 **浏览文件夹…**，进入目标仓库根目录后点 **选择此文件夹**（也可粘贴绝对路径）  
-2. 选聚合粒度（默认 **自动**：workspaces / 功能目录叙事 / 一级目录；可被 `flora.modules.yaml` 覆盖）  
-3. 点 **开始生长**  
-4. 左侧看分析摘要 / 热点 / 模块列表；画布上点植物打开诊断抽屉  
+1. **浏览文件夹…** 选仓库根（或粘贴绝对路径）  
+2. 聚合粒度默认 **自动**。Maven 仓会先出模块，并把 `src/main/resources/static` 下的前端单独成株。可调 **叙事株数**（约 4–24）：过少继续下钻，过多按父目录成簇  
+3. **开始生长**  
+4. 点株 → 抽屉（按钮在标题下）→ **下钻此株** 或双击；面包屑返回。下钻 Java 模块会落到 `hub` / `mix` 这类包，而不是 `src` 或 `com`  
+5. 左侧：分析摘要 / 热点 / 模块列表  
 
-产物写在目标仓库的 `.flora/snapshot.json`。notes 里会列出规则、模块地图、污染扩散、结构腐化等。
+产物：目标仓 `.flora/snapshot.json`。notes 会写规则、地图、污染、结构腐化、叙事目标等。
 
 ### 2.2 时间轴回放
 
-1. 底部点 **生成回放**（需该目录是 git 仓库；按出生/活跃度近似演化，**不会 checkout**）  
-2. 拖滑条或点 **回放**  
+1. **生成回放**（需 git）：优先按近期提交做 **worktree 真实分析**；失败则回退「出生/活跃度近似」  
+2. 拖滑条或 **回放**  
+3. 只要更快、不 checkout：CLI 加 `--approx`
 
-无 git 时仍可分析当前树，但无法生成多帧时间轴。
+### 2.3 PR 双花园
 
-### 2.3 PR 双花园对比
+对比两分支**各自 tip**（已提交树），不是工作区脏改动。
 
-对比的是两个分支**各自最新 tip**（已提交树），不是工作区未提交改动。
-
-1. 选择/生长项目后，侧栏会自动拉取分支列表  
-2. 用下拉框选 **Base 分支** 与 **Head 分支**（默认多为 `main` → 当前分支）  
-3. 点 **对比双花园** → 左右并排铺满舞台；变差/新增/移除会高亮  
-4. **刷新分支** 可重新读取；**退出对比** 回到单花园  
-
-CLI：
+1. 生长项目后侧栏自动拉分支  
+2. 选 **Base** / **Head** → **对比双花园**（变差/新增/移除会高亮）  
+3. **刷新分支** / **退出对比**
 
 ```bash
 pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feature/x --comment
@@ -69,22 +63,16 @@ pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feat
 | 看见什么 | 含义 |
 |---|---|
 | 绿色植株 | 健康 |
-| 粉色花点 / 花丛色 | 开花（健康且近期活跃） |
-| 褐黄 | 枯萎（覆盖率偏低、孤儿、热点核心等） |
+| 粉色花点 | 开花（健康且近期活跃） |
+| 褐黄 | 枯萎（覆盖率低、孤儿、热点等） |
 | 灰白缩小 | 濒死（严重违规等） |
-| 根须缠绕 | 循环、过高耦合、上帝模块/不稳定依赖 |
+| 根须缠绕 | 循环、过高耦合、上帝模块 / 不稳定 |
 | 紫色虚线藤 | 循环依赖 |
-| 偏红违规藤 | 跨层 / entry-only / import 黑名单等 |
-| 地面暗斑 | 污染源及**沿藤扩散**的次生污染 |
+| 偏红违规藤 | 跨层 / entry-only / import 黑名单 |
+| 地面暗斑 | 污染源及沿藤扩散的次生污染 |
+| 「其余 · N」 / 「名 · 名 +N」 | 叙事折叠：同级模块合成一株，不会整园收成一棵 `src` |
 
-点选一株后：相关藤加粗，其余淡出。抽屉里可看：
-
-- 健康度 / 覆盖率 / 耦合 / 活跃度  
-- 扇入扇出、文件与行数  
-- **不稳定性 I**、上帝模块 / 孤儿 / 热点核心标记  
-- 违规列表与双向依赖  
-
-左侧「问题热点」会优先列出上帝模块、孤儿、缠绕与枯萎。
+点选一株：相关藤加粗。抽屉含健康 / 覆盖 / 耦合 / 活跃、扇入出、**不稳定性 I**、结构标记、违规与双向依赖。左侧「问题热点」优先列上帝模块、孤儿、缠绕与枯萎。
 
 ---
 
@@ -95,10 +83,11 @@ pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feat
 ```bash
 pnpm studio
 
-pnpm --filter @flora/cli start analyze G:/code/my-app
+pnpm --filter @flora/cli start analyze G:/code/my-app -- --target 12
 pnpm --filter @flora/cli start analyze G:/code/my-app -- --rules flora.rules.yaml -g package
 
-pnpm --filter @flora/cli start timeline G:/code/my-app -- --days 30 --frames 12
+pnpm --filter @flora/cli start timeline G:/code/my-app -- --days 30 --frames 8
+pnpm --filter @flora/cli start timeline G:/code/my-app -- --approx
 
 pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feature/x --comment
 ```
@@ -112,27 +101,27 @@ pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feat
 | 文件 | 作用 |
 |---|---|
 | `flora.rules.yaml` | 分层、禁止边、入口约束、import 黑名单；声明 layers 会**自动加厚** |
-| `flora.modules.yaml` | 合并 / 拆分 / 忽略模块，或强制粒度 |
+| `flora.modules.yaml` | 合并 / 拆分 / 忽略，或强制粒度 |
 
-完整语法与示例见 [CONFIG.md](./CONFIG.md)。
+语法见 [CONFIG.md](./CONFIG.md)。叙事株数用 Studio 滑杆或 CLI `--target`，不写在 yaml 里。
 
 ---
 
 ## 6. 示例仓
 
-`examples/sample-monorepo` 含 workspaces、故意循环、跨层规则、Python 包、模块地图。
+`examples/sample-monorepo`：workspaces、故意循环、跨层规则、Python、模块地图。
 
 ```bash
 pnpm analyze:sample
 ```
 
-预期约 5 株、循环藤、违规藤、污染扩散；notes 含规则加厚 / 结构腐化。详见 [示例说明](../examples/sample-monorepo/README.md)。
+预期约 5 株、循环藤、违规藤、污染扩散。详见 [示例说明](../examples/sample-monorepo/README.md)。
 
 ---
 
 ## 7. 落盘目录
 
-分析目标仓库下：
+目标仓库：
 
 ```
 .flora/
@@ -148,20 +137,26 @@ pnpm analyze:sample
 
 ## 8. 常见问题
 
-**路径不对 / 只有 1 株**  
-用绝对路径，或 Studio 内浏览选择。
+**路径不对 / 植株过少**  
+用绝对路径或 Studio 浏览。自动粒度下调高「叙事株数」，或点株下钻。
+
+**满园都是 Java，或完全看不到 Java**  
+用 **自动**，不要用「文件」。文件粒度若扫进全部 `.java`，枫树会盖住前端；自动会同时留下 Maven 模块和静态前端。下钻某一模块才进入 Java 包。若仍只有一种语言，先确认粒度不是「文件」，再重新「开始生长」（旧快照不会自己变）。
+
+**植株过多 / 图面挤**  
+调低叙事株数；或 `-g package`；或用 `flora.modules.yaml` merge。
 
 **对比失败**  
-目录需是 git 仓库；下拉框选两个不同分支。可用「刷新分支」。
+需为 git 仓；选两个不同分支；可「刷新分支」。
 
 **依赖边偏少**  
-外部 npm / 标准库会忽略；`import type` 不计入耦合。workspace 内会用 `package.json` 声明依赖补软边。仍缺边时检查是否用了相对路径、workspace 包名或 tsconfig paths。
+外部包与 `import type` 不计。workspace 会用 `package.json` 补软边。仍缺则检查相对路径 / 包名 / tsconfig paths。
 
-**植株边界不对**  
-写 `flora.modules.yaml` 做 merge/split/ignore，或改 Studio 粒度。
+**边界不对**  
+`flora.modules.yaml` 的 merge/split/ignore，或改粒度 / 下钻。
 
-**时间轴不像真历史**  
-当前是出生/活跃度近似；真分支对比用双花园。
+**时间轴很慢**  
+真实提交切片要多次 worktree 分析。可 `--approx` 或减少 `--frames`。
 
-**Studio 很简陋**  
-先 `pnpm build`，再 `pnpm studio`。
+**Studio 空白 / 很旧**  
+`pnpm build` 后再 `pnpm studio`。

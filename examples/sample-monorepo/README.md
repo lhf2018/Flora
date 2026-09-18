@@ -35,6 +35,6 @@ pnpm analyze:sample
 pnpm --filter @flora/cli start analyze G:/code/Flora/examples/sample-monorepo
 ```
 
-Studio：`pnpm studio` → 浏览到本目录 → **开始生长**。
+Studio：`pnpm studio` → 浏览到本目录 → 可调叙事株数 → **开始生长**。
 
 本目录若未单独 `git init`，时间轴 / compare 请对**有 git 的真实仓库**使用；仅测 analyze 时不必是 git 仓。

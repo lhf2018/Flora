@@ -27,6 +27,15 @@ export {
 } from "./types.js";
 export { analyze, summarizeDelta } from "./analyze.js";
 export { discoverModuleGraph } from "./discover.js";
+export type { DiscoverOptions } from "./discover.js";
+export {
+  DEFAULT_TARGET_PLANTS,
+  MIN_TARGET_PLANTS,
+  MAX_TARGET_PLANTS,
+  clampTargetPlants,
+  fitModulesToTarget,
+  isFoldedModule,
+} from "./narrative.js";
 export { findCycles } from "./cycles.js";
 export {
   computeLayout,
@@ -68,6 +77,7 @@ export {
   loadTimeline,
   loadTimelineFrame,
 } from "./timeline.js";
+export type { TimelineProgress } from "./timeline.js";
 export {
   analyzeAtRef,
   annotateSnapshotForDiff,

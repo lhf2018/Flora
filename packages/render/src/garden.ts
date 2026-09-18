@@ -26,6 +26,8 @@ export interface GardenRendererOptions {
   canvas: HTMLCanvasElement;
   snapshot: GardenSnapshot;
   onSelect?: (plant: Plant | null) => void;
+  /** double-click a plant to drill into it */
+  onDrill?: (plant: Plant) => void;
   selectedId?: string | null;
   /** ids to emphasize (e.g. PR worsened modules) */
   highlightIds?: string[] | Set<string>;
@@ -47,6 +49,14 @@ function hash(s: string): number {
   return Math.abs(h);
 }
 
+/** Prefer the meaningful tail (`analyze`) over a long `…/src/…` prefix. */
+function shortPlantLabel(label: string, maxLen: number): string {
+  const parts = label.split("/").filter(Boolean);
+  const tail = parts[parts.length - 1] ?? label;
+  if (tail.length <= maxLen) return tail;
+  return tail.slice(0, maxLen - 1) + "…";
+}
+
 function plantRadius(plant: Plant): number {
   const base = 14 + Math.min(18, Math.sqrt(Math.max(1, plant.metrics.fileCount)) * 2.2);
   if (plant.state === "dying") return base * 0.7;
@@ -58,6 +68,7 @@ export class GardenRenderer {
   private ctx: CanvasRenderingContext2D;
   private snapshot: GardenSnapshot;
   private onSelect?: (plant: Plant | null) => void;
+  private onDrill?: (plant: Plant) => void;
   private selectedId: string | null = null;
   private hoverId: string | null = null;
   private highlightIds = new Set<string>();
@@ -75,12 +86,14 @@ export class GardenRenderer {
     this.ctx = ctx;
     this.snapshot = opts.snapshot;
     this.onSelect = opts.onSelect;
+    this.onDrill = opts.onDrill;
     this.selectedId = opts.selectedId ?? null;
     this.setHighlights(opts.highlightIds);
     this.badges = opts.badges ?? {};
     this.title = opts.title ?? "";
     this.resize();
     this.canvas.addEventListener("click", this.handleClick);
+    this.canvas.addEventListener("dblclick", this.handleDblClick);
     this.canvas.addEventListener("mousemove", this.handleMove);
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
@@ -110,9 +123,14 @@ export class GardenRenderer {
     this.title = title ?? "";
   }
 
+  setOnDrill(fn?: ((plant: Plant) => void) | null) {
+    this.onDrill = fn ?? undefined;
+  }
+
   destroy() {
     cancelAnimationFrame(this.raf);
     this.canvas.removeEventListener("click", this.handleClick);
+    this.canvas.removeEventListener("dblclick", this.handleDblClick);
     this.canvas.removeEventListener("mousemove", this.handleMove);
   }
 
@@ -135,13 +153,18 @@ export class GardenRenderer {
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     const size = this.layoutSize();
-    const sx = w / size.width;
-    const sy = h / size.height;
-    // tighter fit in split panes so the garden isn't tiny
-    const pad = Math.min(w, h) < 560 ? 0.98 : 0.94;
-    this.view.scale = Math.min(sx, sy) * pad;
-    this.view.ox = (w - size.width * this.view.scale) / 2;
-    this.view.oy = (h - size.height * this.view.scale) / 2;
+    const padX = 36;
+    const padTop = 92;
+    const padBottom = 20;
+    const availW = Math.max(120, w - padX * 2);
+    const availH = Math.max(120, h - padTop - padBottom);
+    const sx = availW / size.width;
+    const sy = availH / size.height;
+    this.view.scale = Math.min(sx, sy);
+    const drawnW = size.width * this.view.scale;
+    const drawnH = size.height * this.view.scale;
+    this.view.ox = (w - drawnW) / 2;
+    this.view.oy = padTop + Math.max(0, (availH - drawnH) / 2);
   }
 
   private worldFromEvent(e: MouseEvent) {
@@ -175,11 +198,26 @@ export class GardenRenderer {
     this.onSelect?.(plant);
   };
 
+  private handleDblClick = (e: MouseEvent) => {
+    const { x, y } = this.worldFromEvent(e);
+    const plant = this.hitTest(x, y);
+    if (plant && this.onDrill) {
+      e.preventDefault();
+      this.selectedId = plant.id;
+      this.onDrill(plant);
+    }
+  };
+
   private handleMove = (e: MouseEvent) => {
     const { x, y } = this.worldFromEvent(e);
     const plant = this.hitTest(x, y);
     this.hoverId = plant?.id ?? null;
-    this.canvas.style.cursor = plant ? "pointer" : "default";
+    this.canvas.style.cursor = plant ? (this.onDrill ? "pointer" : "pointer") : "default";
+    if (plant && this.onDrill) {
+      this.canvas.title = "双击下钻";
+    } else {
+      this.canvas.title = "";
+    }
   };
 
   private loop() {
@@ -486,11 +524,8 @@ export class GardenRenderer {
     }
 
     // label plate — higher contrast, larger when focused
-    const maxLen = selected || highlighted ? 28 : 20;
-    const label =
-      plant.label.length > maxLen
-        ? plant.label.slice(0, maxLen - 1) + "…"
-        : plant.label;
+    const maxLen = selected || highlighted ? 28 : 18;
+    const label = shortPlantLabel(plant.label, maxLen);
     const fontSize = selected || highlighted ? 13 : 12;
     ctx.font = `600 ${fontSize}px 'Source Sans 3', 'Segoe UI', 'PingFang SC', sans-serif`;
     ctx.textAlign = "center";

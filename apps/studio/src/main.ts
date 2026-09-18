@@ -120,7 +120,18 @@ app.innerHTML = `
           <option value="file">文件（采样）</option>
         </select>
 
+        <label class="field" for="target-plants">叙事株数 <span id="target-plants-val">12</span></label>
+        <input type="range" id="target-plants" min="4" max="24" value="12" step="1" />
+        <p class="field-hint">自动粒度下：过少则下钻，过多则折叠为「其余」</p>
+
         <button id="grow" type="button">开始生长</button>
+
+        <div class="drill-bar" id="drill-bar" hidden>
+          <div class="drill-title">下钻路径</div>
+          <div class="breadcrumbs" id="breadcrumbs"></div>
+          <div class="drill-focus" id="drill-focus"></div>
+          <p class="field-hint">画布上双击植株也可下钻</p>
+        </div>
 
         <div class="compare-box">
           <div class="compare-title">PR 双花园</div>
@@ -171,12 +182,16 @@ app.innerHTML = `
           </div>
         </div>
         <div class="timeline-bar" id="timeline-bar" hidden>
-          <button type="button" class="ghost" id="timeline-build" title="从 git 生成历史">生成回放</button>
+          <button type="button" class="ghost" id="timeline-build" title="按 git 提交真实切片（失败则回退近似）">生成回放</button>
           <button type="button" class="ghost" id="timeline-prev">◀</button>
           <input type="range" id="timeline-range" min="0" max="0" value="0" />
           <button type="button" class="ghost" id="timeline-next">▶</button>
           <button type="button" class="ghost" id="timeline-play">回放</button>
           <span class="timeline-date" id="timeline-date">—</span>
+          <div class="timeline-progress" id="timeline-progress" hidden>
+            <div class="timeline-progress-bar" id="timeline-progress-bar"></div>
+            <span id="timeline-progress-label"></span>
+          </div>
         </div>
         <div class="statusbar" id="bar">等待路径…</div>
       </main>
@@ -199,6 +214,14 @@ const canvasHead = document.querySelector<HTMLCanvasElement>("#garden-head")!;
 const stageSingle = document.querySelector<HTMLElement>("#stage-single")!;
 const stageCompare = document.querySelector<HTMLElement>("#stage-compare")!;
 const granularityEl = document.querySelector<HTMLSelectElement>("#granularity")!;
+const targetPlantsEl = document.querySelector<HTMLInputElement>("#target-plants")!;
+const targetPlantsVal = document.querySelector<HTMLSpanElement>("#target-plants-val")!;
+const drillBar = document.querySelector<HTMLElement>("#drill-bar")!;
+const breadcrumbsEl = document.querySelector<HTMLElement>("#breadcrumbs")!;
+const drillFocusEl = document.querySelector<HTMLElement>("#drill-focus")!;
+const timelineProgressEl = document.querySelector<HTMLElement>("#timeline-progress")!;
+const timelineProgressBar = document.querySelector<HTMLElement>("#timeline-progress-bar")!;
+const timelineProgressLabel = document.querySelector<HTMLElement>("#timeline-progress-label")!;
 const baseBranchEl = document.querySelector<HTMLSelectElement>("#base-branch")!;
 const headBranchEl = document.querySelector<HTMLSelectElement>("#head-branch")!;
 const exitCompareBtn = document.querySelector<HTMLButtonElement>("#exit-compare")!;
@@ -206,6 +229,12 @@ const timelineBar = document.querySelector<HTMLElement>("#timeline-bar")!;
 const timelineRange = document.querySelector<HTMLInputElement>("#timeline-range")!;
 const timelineDate = document.querySelector<HTMLSpanElement>("#timeline-date")!;
 const timelinePlayBtn = document.querySelector<HTMLButtonElement>("#timeline-play")!;
+
+interface DrillFrame {
+  label: string;
+  focusPath: string | null;
+  snapshot: GardenSnapshot;
+}
 
 let renderer: GardenRenderer | null = null;
 let rendererBase: GardenRenderer | null = null;
@@ -217,6 +246,65 @@ let timelineIndex = 0;
 let playing = false;
 let playTimer: number | null = null;
 let currentRoot = "";
+let projectRoot = "";
+let drillStack: DrillFrame[] = [];
+
+targetPlantsEl.addEventListener("input", () => {
+  targetPlantsVal.textContent = targetPlantsEl.value;
+});
+
+function targetPlants(): number {
+  return Number(targetPlantsEl.value) || 12;
+}
+
+function joinFs(base: string, rel: string): string {
+  const win = /\\/.test(base) || /^[A-Za-z]:/.test(base);
+  const sep = win ? "\\" : "/";
+  const a = base.replace(/[/\\]+$/, "");
+  const b = rel.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+  if (win) return `${a}${sep}${b.replace(/\//g, "\\")}`;
+  return `${a}/${b}`;
+}
+
+function plantFocusPath(snap: GardenSnapshot, plant: Plant): string | null {
+  if (!plant.path) return null;
+  const base = snap.meta.rootPath ?? projectRoot;
+  if (!base) return null;
+  if (plant.path === "." || plant.path === "") return base;
+  return joinFs(base, plant.path);
+}
+
+function renderBreadcrumbs() {
+  if (drillStack.length <= 1) {
+    drillBar.hidden = true;
+    breadcrumbsEl.innerHTML = "";
+    drillFocusEl.textContent = "";
+    return;
+  }
+  drillBar.hidden = false;
+  breadcrumbsEl.innerHTML = drillStack
+    .map(
+      (f, i) =>
+        `<button type="button" class="crumb${i === drillStack.length - 1 ? " current" : ""}" data-idx="${i}">${escapeHtml(
+          f.label,
+        )}</button>`,
+    )
+    .join('<span class="crumb-sep">›</span>');
+  const top = drillStack[drillStack.length - 1]!;
+  const focus =
+    top.focusPath ??
+    top.snapshot.meta.rootPath ??
+    projectRoot;
+  drillFocusEl.textContent = focus;
+  drillFocusEl.title = focus;
+  breadcrumbsEl.querySelectorAll<HTMLButtonElement>(".crumb").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.idx);
+      if (!Number.isFinite(idx) || idx >= drillStack.length - 1) return;
+      void jumpDrill(idx);
+    });
+  });
+}
 
 function activeDrawer(): HTMLElement {
   return compareMode ? drawerCompareEl : drawerEl;
@@ -401,6 +489,14 @@ function showPlant(plant: Plant | null, sourceSnapshot?: GardenSnapshot | null) 
     <div class="state-pill state-${plant.state}">${STATE_ZH[plant.state] ?? plant.state}${
       plant.layer ? ` · ${plant.layer}` : ""
     }</div>
+    ${
+      !compareMode && plant.path
+        ? `<div class="drill-actions">
+        <button type="button" class="secondary drill-btn" id="drill-plant">下钻此株</button>
+        <button type="button" class="ghost drill-btn" id="drill-file">只看此路径</button>
+      </div>`
+        : ""
+    }
     <div class="species-line">${escapeHtml(speciesLabel(plant))} · ${escapeHtml(langMix(plant))}</div>
 
     ${meter("健康度", plant.metrics.health, healthKind)}
@@ -442,6 +538,13 @@ function showPlant(plant: Plant | null, sourceSnapshot?: GardenSnapshot | null) 
 
   drawer.querySelector("#drawer-close")?.addEventListener("click", () => {
     showPlant(null);
+  });
+
+  drawer.querySelector("#drill-plant")?.addEventListener("click", () => {
+    void drillInto(plant, snap);
+  });
+  drawer.querySelector("#drill-file")?.addEventListener("click", () => {
+    void drillInto(plant, snap);
   });
 
   drawer.querySelectorAll<HTMLButtonElement>("[data-id]").forEach((btn) => {
@@ -873,6 +976,7 @@ async function runCompare() {
         baseRef,
         headRef,
         granularity: granularityEl.value,
+        targetPlants: targetPlants(),
       }),
     });
     const data = (await res.json()) as {
@@ -918,10 +1022,12 @@ function showFrame(index: number) {
       canvas,
       snapshot: snap,
       onSelect: showPlant,
+      onDrill: onDrillPlant,
     });
     window.addEventListener("resize", () => renderer?.resize());
   } else {
     renderer.setSnapshot(snap);
+    renderer.setOnDrill(onDrillPlant);
     renderer.resize();
   }
   showPlant(null);
@@ -988,8 +1094,29 @@ document.querySelector("#timeline-build")!.addEventListener("click", async () =>
     notesEl.textContent = "请先选择并生长一个项目";
     return;
   }
-  notesEl.textContent = "正在从 git 生成时间轴（可能需要一些时间）…";
+  notesEl.textContent = "正在生成时间轴…";
   stopPlayback();
+  timelineProgressEl.hidden = false;
+  timelineProgressBar.style.width = "0%";
+  timelineProgressLabel.textContent = "启动…";
+  const poll = window.setInterval(async () => {
+    try {
+      const pr = await fetch("/api/timeline/progress");
+      const p = (await pr.json()) as {
+        active?: boolean;
+        done?: number;
+        total?: number;
+        label?: string;
+      };
+      if (p.total && p.total > 0) {
+        const pct = Math.min(100, Math.round(((p.done ?? 0) / p.total) * 100));
+        timelineProgressBar.style.width = `${pct}%`;
+      }
+      timelineProgressLabel.textContent = p.label || "…";
+    } catch {
+      /* ignore */
+    }
+  }, 400);
   try {
     const res = await fetch("/api/timeline/build", {
       method: "POST",
@@ -997,24 +1124,167 @@ document.querySelector("#timeline-build")!.addEventListener("click", async () =>
       body: JSON.stringify({
         rootPath: currentRoot,
         days: 30,
-        frames: 12,
+        frames: 8,
         granularity: granularityEl.value,
+        targetPlants: targetPlants(),
+        mode: "auto",
+        concurrency: 2,
       }),
     });
     const data = (await res.json()) as {
       frames?: TimelineFramePayload[];
       error?: string;
+      mode?: string;
+      cacheNote?: string | null;
     };
     if (!res.ok) {
       notesEl.textContent = data.error || "生成失败";
       return;
     }
     setupTimeline(data.frames ?? []);
-    notesEl.textContent = `✓ 时间轴 ${timelineFrames.length} 帧已就绪，点「回放」观看演化`;
+    const modeZh = data.mode === "commits" ? "真实提交切片" : "活跃度近似";
+    const cache = data.cacheNote ? ` · ${data.cacheNote}` : "";
+    notesEl.textContent = `✓ 时间轴 ${timelineFrames.length} 帧（${modeZh}${cache}），点「回放」观看演化`;
   } catch (err) {
     notesEl.textContent = err instanceof Error ? err.message : String(err);
+  } finally {
+    window.clearInterval(poll);
+    timelineProgressEl.hidden = true;
   }
 });
+
+function onDrillPlant(plant: Plant) {
+  if (!snapshot || compareMode) return;
+  void drillInto(plant, snapshot);
+}
+
+function applyGardenSnapshot(snap: GardenSnapshot, summary?: string) {
+  snapshot = snap;
+  emptyEl.style.display = "none";
+  if (!renderer) {
+    renderer = new GardenRenderer({
+      canvas,
+      snapshot: snap,
+      onSelect: showPlant,
+      onDrill: onDrillPlant,
+    });
+    window.addEventListener("resize", () => renderer?.resize());
+  } else {
+    renderer.setSnapshot(snap);
+    renderer.setHighlights(null);
+    renderer.setBadges(null);
+    renderer.setOnDrill(onDrillPlant);
+    renderer.resize();
+  }
+  renderReport(snap);
+  showPlant(null);
+  barEl.innerHTML = `<span>今日花园 · <strong>${escapeHtml(
+    snap.meta.projectId,
+  )}</strong></span><em>${escapeHtml(summary ?? summarizeLocal(snap))}</em>`;
+  notesEl.textContent = (snap.meta.notes ?? []).map((n) => `· ${n}`).join("\n");
+  renderBreadcrumbs();
+  void loadRecent();
+}
+
+function summarizeLocal(snap: GardenSnapshot): string {
+  return `${snap.report.plantCount} 模块 · ${snap.report.vineCount} 依赖 · 健康 ${Math.round(snap.report.avgHealth * 100)}%`;
+}
+
+async function runAnalyze(opts: {
+  rootPath: string;
+  focusPath?: string | null;
+  resetDrill?: boolean;
+  label?: string;
+}): Promise<GardenSnapshot | null> {
+  const res = await fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      rootPath: opts.rootPath,
+      granularity: granularityEl.value,
+      targetPlants: targetPlants(),
+      focusPath: opts.focusPath || undefined,
+    }),
+  });
+  const data = (await res.json()) as AnalyzeResponse & { drilled?: boolean };
+  if (!res.ok) {
+    notesEl.textContent = data.error || "分析失败";
+    return null;
+  }
+  const snap = data.snapshot;
+  if (!snap) {
+    notesEl.textContent = "无快照返回";
+    return null;
+  }
+
+  if (opts.resetDrill) {
+    drillStack = [
+      {
+        label: opts.label ?? path.basenameLike(opts.rootPath),
+        focusPath: null,
+        snapshot: snap,
+      },
+    ];
+  } else if (opts.focusPath) {
+    drillStack.push({
+      label: opts.label ?? opts.focusPath.split(/[/\\]/).pop() ?? "drill",
+      focusPath: opts.focusPath,
+      snapshot: snap,
+    });
+  }
+
+  applyGardenSnapshot(snap, data.summary);
+  return snap;
+}
+
+/** tiny basename without node:path */
+const path = {
+  basenameLike(p: string) {
+    const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
+    return parts[parts.length - 1] || p;
+  },
+};
+
+async function drillInto(plant: Plant, snap: GardenSnapshot) {
+  if (compareMode) return;
+  if (!projectRoot) projectRoot = pathEl.value.trim();
+  const focus = plantFocusPath(snap, plant);
+  if (!focus || !projectRoot) {
+    barEl.textContent = "无法解析下钻路径";
+    notesEl.textContent = "请先选择项目并生长花园";
+    return;
+  }
+  const same =
+    snap.meta.rootPath &&
+    normalizePath(focus) === normalizePath(snap.meta.rootPath);
+  notesEl.textContent = same
+    ? `「${plant.label}」已是当前根，改为按文件展开…`
+    : `下钻「${plant.label}」…`;
+  barEl.textContent = "点株下钻分析中…";
+  const prevGranularity = granularityEl.value;
+  if (same) granularityEl.value = "file";
+  try {
+    await runAnalyze({
+      rootPath: projectRoot,
+      focusPath: same ? undefined : focus,
+      label: plant.label,
+    });
+  } finally {
+    granularityEl.value = prevGranularity;
+  }
+}
+
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+async function jumpDrill(idx: number) {
+  const frame = drillStack[idx];
+  if (!frame || !projectRoot) return;
+  drillStack = drillStack.slice(0, idx + 1);
+  // re-apply cached snapshot for speed; optionally refresh
+  applyGardenSnapshot(frame.snapshot);
+}
 
 async function grow() {
   const rootPath = pathEl.value.trim();
@@ -1023,71 +1293,43 @@ async function grow() {
     return;
   }
   currentRoot = rootPath;
+  projectRoot = rootPath;
   if (compareMode) exitCompareMode();
   notesEl.textContent = "构建中…";
   barEl.textContent = "探测结构 → 解析依赖 → 规则 → 布局…";
   stopPlayback();
   try {
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        rootPath,
-        granularity: granularityEl.value,
-      }),
+    const snap = await runAnalyze({
+      rootPath,
+      resetDrill: true,
+      label: path.basenameLike(rootPath),
     });
-    const data = (await res.json()) as AnalyzeResponse;
-    if (!res.ok) {
-      notesEl.textContent = data.error || "分析失败";
-      return;
-    }
-    snapshot = data.snapshot;
-    emptyEl.style.display = "none";
-    notesEl.textContent = (snapshot.meta.notes ?? [])
-      .map((n) => `✓ ${n}`)
-      .join("\n");
-    barEl.innerHTML = `<span>今日花园 · <strong>${escapeHtml(
-      snapshot.meta.projectId,
-    )}</strong></span><em>${escapeHtml(data.summary)}</em>`;
-
-    renderReport(snapshot);
-
-    if (!renderer) {
-      renderer = new GardenRenderer({
-        canvas,
-        snapshot,
-        onSelect: showPlant,
-      });
-      window.addEventListener("resize", () => renderer?.resize());
-    } else {
-      renderer.setSnapshot(snapshot);
-      renderer.setHighlights(null);
-      renderer.setBadges(null);
-      renderer.resize();
-    }
-    showPlant(null);
-    await loadRecent();
-    await loadBranches(rootPath, false);
-
+    if (!snap) return;
+    void loadBranches(rootPath, true);
     try {
-      const tr = await fetch(
+      const tl = await fetch(
         `/api/timeline?rootPath=${encodeURIComponent(rootPath)}`,
       );
-      if (tr.ok) {
-        const td = (await tr.json()) as { frames: TimelineFramePayload[] };
-        setupTimeline(td.frames ?? []);
+      if (tl.ok) {
+        const tdata = (await tl.json()) as { frames?: TimelineFramePayload[] };
+        if (tdata.frames?.length) {
+          timelineBar.hidden = false;
+          setupTimeline(tdata.frames);
+        } else {
+          timelineBar.hidden = false;
+          timelineFrames = [
+            {
+              date: snap.meta.capturedAt.slice(0, 10),
+              snapshotRef: "",
+              snapshot: snap,
+            },
+          ];
+          timelineRange.min = "0";
+          timelineRange.max = "0";
+          timelineDate.textContent = timelineFrames[0]!.date;
+        }
       } else {
         timelineBar.hidden = false;
-        timelineFrames = [
-          {
-            date: snapshot.meta.capturedAt.slice(0, 10),
-            snapshotRef: ".flora/snapshot.json",
-            snapshot,
-          },
-        ];
-        timelineRange.min = "0";
-        timelineRange.max = "0";
-        timelineDate.textContent = timelineFrames[0]!.date;
       }
     } catch {
       timelineBar.hidden = false;

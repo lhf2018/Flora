@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -15,18 +16,24 @@ import {
   diffusePollutions,
   structureViolations,
 } from "./structure.js";
-import { writeJson } from "./fs.js";
+import { exists, slugId, writeJson } from "./fs.js";
 import type {
   AnalyzeOptions,
   DependencyRef,
   GardenReport,
   GardenSnapshot,
+  ModuleGraph,
   Plant,
   PlantState,
   Vine,
   Violation,
 } from "./types.js";
 import { DEFAULT_IGNORE, FLORA_VERSION, STATE_LABELS } from "./types.js";
+import {
+  DEFAULT_TARGET_PLANTS,
+  clampTargetPlants,
+  isFoldedModule,
+} from "./narrative.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -150,34 +157,102 @@ function buildReport(plants: Plant[], vines: Vine[], cycles: string[][]): Garden
 }
 
 export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> {
-  const rootPath = path.resolve(options.rootPath);
+  const projectRoot = path.resolve(options.rootPath);
+  let rootPath = projectRoot;
   const ignore = options.ignore?.length ? options.ignore : DEFAULT_IGNORE;
   const granularity = options.granularity ?? "auto";
   const notes: string[] = [];
+  const targetPlants =
+    clampTargetPlants(options.targetPlants) ??
+    (granularity === "auto" ? DEFAULT_TARGET_PLANTS : undefined);
 
-  const rules = loadRules(rootPath, options.rulesPath);
-  const modulesMap = loadModulesMap(rootPath, options.modulesMapPath);
-  const graph = discoverModuleGraph(
-    rootPath,
-    granularity,
-    ignore,
-    rules,
-    modulesMap,
-  );
+  let singleFileFocus: string | null = null;
+
+  if (options.focusPath) {
+    const focus = path.isAbsolute(options.focusPath)
+      ? path.resolve(options.focusPath)
+      : path.resolve(projectRoot, options.focusPath);
+    if (!exists(focus)) {
+      throw new Error(`下钻路径不存在: ${options.focusPath}`);
+    }
+    const rel = path.relative(projectRoot, focus);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      throw new Error(`下钻路径必须位于项目内: ${options.focusPath}`);
+    }
+    try {
+      if (fs.statSync(focus).isFile()) {
+        singleFileFocus = focus;
+        rootPath = path.dirname(focus);
+        notes.push(`点株下钻：只看此文件 ${rel.replace(/\\/g, "/")}`);
+      } else {
+        rootPath = focus;
+        notes.push(`点株下钻：${rel.replace(/\\/g, "/") || "."}（目录）`);
+      }
+    } catch {
+      rootPath = focus;
+      notes.push(`点株下钻：${rel.replace(/\\/g, "/") || "."}`);
+    }
+  }
+
+  const rules = loadRules(projectRoot, options.rulesPath);
+  const modulesMap = loadModulesMap(projectRoot, options.modulesMapPath);
+
+  let graph;
+  if (singleFileFocus) {
+    const rel = path.relative(projectRoot, singleFileFocus).replace(/\\/g, "/");
+    const stem = path.basename(singleFileFocus, path.extname(singleFileFocus));
+    graph = {
+      modules: [
+        {
+          id: slugId(rel),
+          path: singleFileFocus,
+          label: stem,
+        },
+      ],
+      edges: [] as ModuleGraph["edges"],
+      strategy: "file-focus",
+      notes: [`单文件聚焦：${rel}`],
+    };
+  } else {
+    graph = discoverModuleGraph(
+      rootPath,
+      granularity,
+      ignore,
+      rules,
+      modulesMap,
+      { targetPlants },
+    );
+  }
+
   notes.push(...graph.notes);
+  if (targetPlants && !singleFileFocus) notes.push(`叙事目标约 ${targetPlants} 株`);
 
-  const coverageMap = loadCoverageByPath(rootPath, options.coveragePath);
+  const coverageMap = loadCoverageByPath(
+    singleFileFocus ? projectRoot : rootPath,
+    options.coveragePath,
+  );
   if (coverageMap.size) notes.push(`已加载覆盖率（${coverageMap.size} 个文件）`);
   else notes.push("覆盖率 lcov 未找到（健康度暂不依赖覆盖率）");
 
   const churnMap = await loadChurnByPath(
-    rootPath,
+    projectRoot,
     graph.modules.map((m) => m.path),
     options.churnDays ?? 14,
   );
 
-  const nodeIds = graph.modules.map((m) => m.id);
-  const cycles = findCycles(nodeIds, graph.edges);
+  const foldedIds = new Set(
+    graph.modules.filter((m) => isFoldedModule(m)).map((m) => m.id),
+  );
+  const cycleNodesInput = graph.modules
+    .map((m) => m.id)
+    .filter((id) => !foldedIds.has(id));
+  const cycleEdgesInput = graph.edges.filter(
+    (e) => !foldedIds.has(e.from) && !foldedIds.has(e.to),
+  );
+  const cycles = findCycles(cycleNodesInput, cycleEdgesInput);
+  if (foldedIds.size) {
+    notes.push(`循环检测已排除 ${foldedIds.size} 个叙事折叠簇`);
+  }
   const cycleNodes = new Set<string>();
   const cycleEdgeKeys = new Set<string>();
   const cycleMembersOf = new Map<string, string[]>();
@@ -434,16 +509,17 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
   );
 
   const cachePath =
-    options.layoutCachePath ?? path.join(rootPath, ".flora", "layout-cache.json");
+    options.layoutCachePath ??
+    path.join(projectRoot, ".flora", "layout-cache.json");
   const cache = plants.length <= 24 ? null : loadLayoutCache(cachePath);
   const layout = computeLayout(plants, vines, cache);
   saveLayoutCache(cachePath, layout);
   notes.push("布局完成");
 
-  const git = await gitMeta(rootPath);
+  const git = await gitMeta(projectRoot);
   const snapshot: GardenSnapshot = {
     meta: {
-      projectId: path.basename(rootPath),
+      projectId: path.basename(projectRoot),
       commit: git.commit,
       branch: git.branch,
       capturedAt: new Date().toISOString(),
@@ -460,13 +536,13 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
   };
 
   if (options.writeSnapshot !== false) {
-    const out = path.join(rootPath, ".flora", "snapshot.json");
+    const out = path.join(projectRoot, ".flora", "snapshot.json");
     writeJson(out, snapshot);
   }
 
-  if (options.appendTimeline !== false) {
+  if (options.appendTimeline !== false && !options.focusPath) {
     const { appendTimelineFrame } = await import("./timeline.js");
-    appendTimelineFrame(rootPath, snapshot);
+    appendTimelineFrame(projectRoot, snapshot);
   }
 
   return snapshot;

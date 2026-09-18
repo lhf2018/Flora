@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, buildTimeline, compareRefs, formatDiffComment, listGitBranches, loadTimeline, loadTimelineFrame, summarizeDelta, DEFAULT_IGNORE } from "@flora/core";
-import type { AggregateGranularity, GardenSnapshot } from "@flora/core";
+import type { AggregateGranularity, GardenSnapshot, TimelineProgress } from "@flora/core";
 import { listDirectories, listRoots, pickFolder } from "./pick-folder.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +17,10 @@ interface AnalyzeBody {
   rootPath?: string;
   granularity?: AggregateGranularity;
   ignore?: string[];
+  targetPlants?: number;
+  focusPath?: string;
+  /** when drilling, don't overwrite root snapshot / timeline */
+  writeSnapshot?: boolean;
 }
 
 interface RecentEntry {
@@ -24,6 +28,9 @@ interface RecentEntry {
   projectId: string;
   at: string;
 }
+
+/** In-flight timeline build progress for Studio polling */
+let timelineProgress: (TimelineProgress & { active: boolean }) | null = null;
 
 function recentFile(): string {
   return path.join(
@@ -169,18 +176,26 @@ export async function startStudioServer(opts: StudioServerOptions = {}) {
           rootPath,
           granularity: body.granularity ?? "auto",
           ignore: body.ignore?.length ? body.ignore : DEFAULT_IGNORE,
-          writeSnapshot: true,
+          targetPlants: body.targetPlants,
+          focusPath: body.focusPath,
+          writeSnapshot: body.focusPath
+            ? false
+            : body.writeSnapshot !== false,
+          appendTimeline: !body.focusPath,
         });
-        saveRecent({
-          path: rootPath,
-          projectId: snapshot.meta.projectId,
-          at: snapshot.meta.capturedAt,
-        });
-        const timeline = loadTimeline(rootPath);
+        if (!body.focusPath) {
+          saveRecent({
+            path: rootPath,
+            projectId: snapshot.meta.projectId,
+            at: snapshot.meta.capturedAt,
+          });
+        }
+        const timeline = body.focusPath ? null : loadTimeline(rootPath);
         sendJson(res, 200, {
           snapshot,
           summary: summarizeDelta(snapshot),
           timeline,
+          drilled: Boolean(body.focusPath),
         });
         return;
       }
@@ -205,34 +220,67 @@ export async function startStudioServer(opts: StudioServerOptions = {}) {
         return;
       }
 
+      if (url.pathname === "/api/timeline/progress" && req.method === "GET") {
+        sendJson(res, 200, timelineProgress ?? { active: false, done: 0, total: 0, label: "", phase: "done" });
+        return;
+      }
+
       if (url.pathname === "/api/timeline/build" && req.method === "POST") {
         const body = JSON.parse((await readBody(req)) || "{}") as {
           rootPath?: string;
           days?: number;
           frames?: number;
           granularity?: AggregateGranularity;
+          targetPlants?: number;
+          mode?: "auto" | "commits" | "approx";
+          concurrency?: number;
         };
         if (!body.rootPath) {
           sendJson(res, 400, { error: "rootPath is required" });
           return;
         }
         const rootPath = path.resolve(body.rootPath);
-        const { timeline, snapshots } = await buildTimeline({
-          rootPath,
-          days: body.days ?? 30,
-          frames: body.frames ?? 12,
-          granularity: body.granularity ?? "auto",
-        });
-        sendJson(res, 200, {
-          timeline,
-          frames: timeline.frames.map((f, i) => ({
-            ...f,
-            snapshot: snapshots[i] ?? loadTimelineFrame(rootPath, f.snapshotRef),
-          })),
-          summary: snapshots.length
-            ? summarizeDelta(snapshots[snapshots.length - 1]!)
-            : "",
-        });
+        timelineProgress = {
+          active: true,
+          phase: "analyze",
+          done: 0,
+          total: body.frames ?? 8,
+          label: "开始…",
+        };
+        try {
+          const { timeline, snapshots } = await buildTimeline({
+            rootPath,
+            days: body.days ?? 30,
+            frames: body.frames ?? 8,
+            granularity: body.granularity ?? "auto",
+            targetPlants: body.targetPlants,
+            mode: body.mode ?? "auto",
+            concurrency: body.concurrency ?? 2,
+            onProgress: (p) => {
+              timelineProgress = { ...p, active: p.phase !== "done" };
+            },
+          });
+          const modeNote = snapshots
+            .flatMap((s) => s.meta.notes ?? [])
+            .find((n) => n.includes("时间轴模式") || n.includes("真实提交"));
+          const cacheNote = snapshots
+            .flatMap((s) => s.meta.notes ?? [])
+            .find((n) => n.includes("缓存命中"));
+          sendJson(res, 200, {
+            timeline,
+            frames: timeline.frames.map((f, i) => ({
+              ...f,
+              snapshot: snapshots[i] ?? loadTimelineFrame(rootPath, f.snapshotRef),
+            })),
+            summary: snapshots.length
+              ? summarizeDelta(snapshots[snapshots.length - 1]!)
+              : "",
+            mode: modeNote?.includes("真实") ? "commits" : "approx",
+            cacheNote: cacheNote ?? null,
+          });
+        } finally {
+          if (timelineProgress) timelineProgress.active = false;
+        }
         return;
       }
 
@@ -261,6 +309,7 @@ export async function startStudioServer(opts: StudioServerOptions = {}) {
           headRef?: string;
           granularity?: AggregateGranularity;
           rulesPath?: string;
+          targetPlants?: number;
         };
         if (!body.rootPath || !body.baseRef || !body.headRef) {
           sendJson(res, 400, {
@@ -279,6 +328,7 @@ export async function startStudioServer(opts: StudioServerOptions = {}) {
           headRef: body.headRef,
           granularity: body.granularity ?? "auto",
           rulesPath: body.rulesPath,
+          targetPlants: body.targetPlants,
         });
         sendJson(res, 200, {
           diff,

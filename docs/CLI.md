@@ -1,17 +1,19 @@
 # CLI 与 Studio API
 
-## CLI
-
 入口：`pnpm --filter @flora/cli start <command> …`  
-（包内也可用已构建的 `node packages/cli/dist/bin.js`。）
+（也可用已构建的 `node packages/cli/dist/bin.js`。）
+
+路径请尽量用**绝对路径**。
+
+---
+
+## CLI
 
 ### `studio`
 
-打开本地 Studio 并托管静态页。
-
 | 选项 | 默认 | 说明 |
 |---|---|---|
-| `-p, --port <port>` | `4173` | 监听端口（`127.0.0.1`） |
+| `-p, --port <port>` | `4173` | `127.0.0.1` |
 | `--no-open` | — | 不自动打开浏览器 |
 
 ```bash
@@ -21,98 +23,79 @@ pnpm --filter @flora/cli start studio -- --port 4177 --no-open
 
 ### `analyze`
 
-扫描仓库，写出 `.flora/snapshot.json`，并默认追加当日 history 帧。
+写出 `.flora/snapshot.json`，默认追加当日 timeline 帧。
 
 | 参数 / 选项 | 默认 | 说明 |
 |---|---|---|
-| `[path]` | `.` | 项目根路径 |
+| `[path]` | `.` | 项目根 |
 | `-g, --granularity` | `auto` | `auto` \| `package` \| `directory` \| `file` |
-| `--rules <file>` | 自动查找 | 架构规则文件 |
+| `--target <n>` | auto 时约 `12` | 叙事目标株数（4–36）。过少下钻；过多按父目录成簇。`file` 不按此折叠，而是按语言均衡采样 |
+| `--rules <file>` | 自动查找 | 架构规则 |
 
 ```bash
-pnpm --filter @flora/cli start analyze G:/code/my-app
+pnpm --filter @flora/cli start analyze G:/code/my-app -- --target 12
 pnpm --filter @flora/cli start analyze G:/code/my-app -- -g package --rules flora.rules.yaml
 ```
 
-规则自动查找顺序：`flora.rules.yaml` / `.yml` / `.json` / `.flora/rules.yaml`。  
-模块地图自动查找：`flora.modules.yaml` 等（见 [CONFIG.md](./CONFIG.md)）。
+规则自动查找：`flora.rules.yaml` / `.yml` / `.json` / `.flora/rules.yaml`。  
+模块地图：`flora.modules.yaml` 等（见 [CONFIG.md](./CONFIG.md)）。
 
 ### `timeline`
 
-按 git 元数据生成多帧时间轴（无需 checkout）。
+优先按 git **提交 worktree** 真实分析；失败或 `--approx` 时用出生/活跃度近似。
 
 | 参数 / 选项 | 默认 | 说明 |
 |---|---|---|
-| `[path]` | `.` | 项目根路径 |
+| `[path]` | `.` | 项目根 |
 | `-d, --days <n>` | `30` | 回溯天数 |
-| `-f, --frames <n>` | `12` | 帧数 |
+| `-f, --frames <n>` | `8` | 帧数（上限约 16） |
 | `-g, --granularity` | `auto` | 同 analyze |
+| `--target <n>` | — | 同 analyze |
+| `--approx` | off | 强制近似模式（不 checkout） |
 
 ```bash
-pnpm --filter @flora/cli start timeline G:/code/my-app -- --days 30 --frames 12
+pnpm --filter @flora/cli start timeline G:/code/my-app -- --days 30 --frames 8
+pnpm --filter @flora/cli start timeline G:/code/my-app -- --approx
 ```
 
 写出 `.flora/timeline.json` 与 `.flora/history/*.json`。
 
 ### `compare`
 
-PR 双花园：对比两个分支的最新 tip。
+对比两分支 tip（临时 worktree，不含脏工作区）。
 
 | 参数 / 选项 | 默认 | 说明 |
 |---|---|---|
-| `[path]` | `.` | 项目根路径（需为 git 仓库） |
+| `[path]` | `.` | 需为 git 仓 |
 | `-b, --base <branch>` | **必填** | 基准分支 |
 | `-H, --head <branch>` | **必填** | 对比分支 |
 | `-g, --granularity` | `auto` | 同 analyze |
-| `--rules <file>` | 自动查找 | 规则文件 |
+| `--rules <file>` | 自动查找 | 规则 |
 | `--comment` | off | 打印 Markdown 评论体 |
 
 ```bash
 pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feature/x --comment
 ```
 
-两侧均取分支 tip 的已提交树（临时 worktree），不含未提交脏改动。
-
 ---
 
 ## Studio HTTP API
 
-Base：`http://127.0.0.1:<port>`（CORS 已放开，供本地页调用）。
+Base：`http://127.0.0.1:<port>`（本地 CORS 已放开）。
 
-### `GET /api/health`
-
-```json
-{ "ok": true }
-```
-
-### `GET /api/recent`
-
-最近分析过的项目（读 `~/.flora/recent.json`）。
-
-```json
-{ "recent": [{ "path": "...", "projectId": "...", "at": "ISO-8601" }] }
-```
-
-### `GET /api/fs/roots`
-
-可选根（盘符 / 家目录等），供页内浏览。
-
-### `GET /api/fs/list?path=<dir>`
-
-列子目录：
-
-```json
-{
-  "path": "G:\\code",
-  "parent": "G:\\",
-  "entries": [{ "name": "Flora", "path": "G:\\code\\Flora" }]
-}
-```
-
-### `POST /api/pick-folder`
-
-体：`{ "startPath"?: string }`  
-尝试原生文件夹对话框；失败时 UI 应回退到 `/api/fs/*`。
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/health` | `{ "ok": true }` |
+| `GET` | `/api/recent` | `~/.flora/recent.json` |
+| `GET` | `/api/fs/roots` | 浏览根 |
+| `GET` | `/api/fs/list?path=` | 列子目录 |
+| `POST` | `/api/pick-folder` | 原生对话框（可选；失败回退 fs API） |
+| `POST` | `/api/analyze` | 分析 / 下钻 |
+| `GET` | `/api/timeline?rootPath=` | 已有时间轴 |
+| `GET` | `/api/timeline/progress` | 生成中的帧进度 |
+| `POST` | `/api/timeline/build` | 生成时间轴 |
+| `GET` | `/api/branches?rootPath=` | 分支列表 |
+| `POST` | `/api/compare` | 双花园 diff |
 
 ### `POST /api/analyze`
 
@@ -120,23 +103,14 @@ Base：`http://127.0.0.1:<port>`（CORS 已放开，供本地页调用）。
 {
   "rootPath": "G:/code/my-app",
   "granularity": "auto",
+  "targetPlants": 12,
+  "focusPath": null,
   "ignore": []
 }
 ```
 
-响应：
-
-```json
-{
-  "snapshot": { "...GardenSnapshot..." },
-  "summary": "5 模块 · 6 依赖 · …",
-  "timeline": null
-}
-```
-
-### `GET /api/timeline?rootPath=<path>`
-
-若存在 timeline，返回索引及各帧内嵌 snapshot。
+- `focusPath`：相对或绝对子路径 → **点株下钻**（不覆盖根 snapshot / 不追加 timeline）  
+- 响应：`{ snapshot, summary, timeline?, drilled? }`
 
 ### `POST /api/timeline/build`
 
@@ -144,29 +118,17 @@ Base：`http://127.0.0.1:<port>`（CORS 已放开，供本地页调用）。
 {
   "rootPath": "G:/code/my-app",
   "days": 30,
-  "frames": 12,
-  "granularity": "auto"
+  "frames": 8,
+  "granularity": "auto",
+  "targetPlants": 12,
+  "mode": "auto"
 }
 ```
 
-### `GET /api/branches?rootPath=<path>`
-
-列出本地 + remote 分支及 tip short SHA，供 Studio 下拉框。
-
-```json
-{
-  "branches": [
-    { "name": "main", "tip": "abc1234", "current": false, "remote": false }
-  ],
-  "current": "feature/x",
-  "defaultBase": "main",
-  "defaultHead": "feature/x"
-}
-```
+`mode`：`auto` \| `commits` \| `approx`。响应含 `mode` 字段提示实际使用的模式。  
+`commits` 默认并发 2，结果缓存在目标仓 `.flora/commit-cache/`。生成时可轮询 `GET /api/timeline/progress`。
 
 ### `POST /api/compare`
-
-对比**两个分支各自最新 tip**（已提交树，经临时 worktree；不是工作区脏改动）。
 
 ```json
 {
@@ -174,56 +136,31 @@ Base：`http://127.0.0.1:<port>`（CORS 已放开，供本地页调用）。
   "baseRef": "main",
   "headRef": "feature/x",
   "granularity": "auto",
-  "rulesPath": null
+  "targetPlants": 12
 }
 ```
 
-响应：
+响应：`{ diff, comment, summary }`（`diff` 含 base/head snapshot、plant/vine changes、高亮 id 列表）。
 
-```json
-{
-  "diff": {
-    "baseRef": "main",
-    "headRef": "feature/x",
-    "base": { "...snapshot..." },
-    "head": { "...snapshot..." },
-    "summary": "…",
-    "bullets": ["…"],
-    "plantChanges": [],
-    "vineChanges": [],
-    "worsenedIds": [],
-    "improvedIds": [],
-    "addedIds": [],
-    "removedIds": []
-  },
-  "comment": "### Flora 花园对比 …",
-  "summary": "…"
-}
-```
-
-静态资源：已构建的 `apps/studio/dist`；未构建时返回内置降级 HTML。
+静态资源：`apps/studio/dist`；未构建时返回内置降级页。
 
 ---
 
 ## 核心库导出（概要）
 
-`@flora/core` 常用：
+`@flora/core`：
 
 | 符号 | 用途 |
 |---|---|
-| `analyze` | 单次分析 → Snapshot |
-| `buildTimeline` / `loadTimeline` | 时间轴 |
+| `analyze` | 分析；支持 `targetPlants` / `focusPath` |
+| `buildTimeline` / `loadTimeline` | 时间轴（commits / approx） |
 | `compareRefs` / `diffGardens` / `formatDiffComment` / `listGitBranches` | PR 对比 |
-| `analyzeAtRef` | 指定 git ref / 分支 tip 分析 |
+| `analyzeAtRef` | 指定 git ref 分析（worktree） |
+| `discoverModuleGraph` / `fitModulesToTarget` | 发现与叙事压缩 |
 | `loadRules` / `loadModulesMap` | 规则与模块地图 |
-| `computeStructureFlags` / `diffusePollutions` | 结构腐化与污染扩散 |
-| `ALL_ADAPTERS` | 多语言解析器 |
+| `computeStructureFlags` / `diffusePollutions` | 结构与污染 |
+| `ALL_ADAPTERS` | 多语言解析 |
 
-`@flora/render`：
-
-| 符号 | 用途 |
-|---|---|
-| `GardenRenderer` | Canvas 花园；支持 `highlightIds` / `badges` / `title` |
-| `mountGarden` | 快捷挂载 |
+`@flora/render`：`GardenRenderer`（`highlightIds` / `badges` / `title`）、`mountGarden`。
 
 类型以各包 `dist/*.d.ts` 为准。
