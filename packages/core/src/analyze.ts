@@ -34,6 +34,10 @@ import {
   clampTargetPlants,
   isFoldedModule,
 } from "./narrative.js";
+import {
+  applyHealthTrends,
+  loadHistorySnapshots,
+} from "./health-trend.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -135,6 +139,25 @@ function buildReport(plants: Plant[], vines: Vine[], cycles: string[][]): Garden
           (p.metrics.hotCore ? "热点核心" : STATE_LABELS[p.state]),
       });
     }
+    if (
+      p.trend &&
+      (p.trend.kind === "declining" ||
+        p.trend.kind === "chronic-wilt" ||
+        p.trend.kind === "new-cycle")
+    ) {
+      const existing = hotspots.find((h) => h.id === p.id);
+      if (existing) {
+        if (!existing.reason.includes(p.trend.label)) {
+          existing.reason = `${p.trend.label} · ${existing.reason}`;
+        }
+      } else {
+        hotspots.unshift({
+          id: p.id,
+          label: p.label,
+          reason: p.trend.label,
+        });
+      }
+    }
   }
 
   const avgHealth =
@@ -149,7 +172,7 @@ function buildReport(plants: Plant[], vines: Vine[], cycles: string[][]): Garden
     cycles: cycleReports,
     stateCounts,
     topCoupled,
-    hotspots: hotspots.slice(0, 10),
+    hotspots: hotspots.slice(0, 12),
     totalFiles: plants.reduce((s, p) => s + p.metrics.fileCount, 0),
     totalLoc: plants.reduce((s, p) => s + p.metrics.loc, 0),
     avgHealth,
@@ -247,7 +270,10 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
     .map((m) => m.id)
     .filter((id) => !foldedIds.has(id));
   const cycleEdgesInput = graph.edges.filter(
-    (e) => !foldedIds.has(e.from) && !foldedIds.has(e.to),
+    (e) =>
+      !foldedIds.has(e.from) &&
+      !foldedIds.has(e.to) &&
+      e.source !== "http",
   );
   const cycles = findCycles(cycleNodesInput, cycleEdgesInput);
   if (foldedIds.size) {
@@ -333,6 +359,8 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
       cycleGroupId: inCycle
         ? cycleGroupOf.get(e.from) ?? cycleGroupOf.get(e.to)
         : undefined,
+      source: e.source,
+      httpPaths: e.httpPaths,
     };
   });
 
@@ -346,6 +374,7 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
       to: e.to,
       deep: e.deep,
       importSpecs: e.importSpecs,
+      source: e.source,
     })),
   });
   notes.push(...ruled.notes);
@@ -412,6 +441,7 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
         label: labelById.get(v.to) ?? v.to,
         weight: v.weight,
         kind: v.kind,
+        source: v.source,
       }))
       .sort((a, b) => b.weight - a.weight);
 
@@ -422,6 +452,7 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
         label: labelById.get(v.from) ?? v.from,
         weight: v.weight,
         kind: v.kind,
+        source: v.source,
       }))
       .sort((a, b) => b.weight - a.weight);
 
@@ -503,6 +534,12 @@ export async function analyze(options: AnalyzeOptions): Promise<GardenSnapshot> 
   ).length;
   if (structCount) notes.push(`结构腐化标记 ${structCount} 株`);
 
+  const history = options.focusPath ? [] : loadHistorySnapshots(projectRoot);
+  const trendCount = applyHealthTrends(plants, history);
+  if (trendCount) {
+    notes.push(`健康趋势 ${trendCount} 株有变化（相对近期快照）`);
+  }
+
   const report = buildReport(plants, vines, cycles);
   notes.push(
     `规模：${report.totalFiles} 文件 / ~${report.totalLoc} 行；平均健康度 ${Math.round(report.avgHealth * 100)}%`,
@@ -562,5 +599,11 @@ export function summarizeDelta(snapshot: GardenSnapshot): string {
   if (r.stateCounts.blooming) parts.push(`开花 ${r.stateCounts.blooming}`);
   const gods = snapshot.plants.filter((p) => p.metrics.godModule).length;
   if (gods) parts.push(`上帝模块 ${gods}`);
+  const httpVines = snapshot.vines.filter((v) => v.source === "http").length;
+  if (httpVines) parts.push(`HTTP ${httpVines}`);
+  const declining = snapshot.plants.filter(
+    (p) => p.trend?.kind === "declining" || p.trend?.kind === "chronic-wilt",
+  ).length;
+  if (declining) parts.push(`下滑 ${declining}`);
   return parts.join(" · ");
 }

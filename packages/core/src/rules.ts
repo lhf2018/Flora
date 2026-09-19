@@ -37,6 +37,7 @@ export interface EdgeMeta {
   to: string;
   deep?: boolean;
   importSpecs?: string[];
+  source?: "import" | "workspace" | "http";
 }
 
 /** Minimal YAML subset parser for flora.rules.yaml */
@@ -313,10 +314,14 @@ export function applyArchitectureRules(input: {
 
   for (const v of vines) {
     const key = `${v.from}→${v.to}`;
+    const meta = metaByKey.get(key);
+    if (meta?.source === "http") {
+      vineKinds.set(key, "normal");
+      continue;
+    }
     let kind: "illegal" | "cycle" | "normal" = cycleEdgeKeys.has(key)
       ? "cycle"
       : "normal";
-    const meta = metaByKey.get(key);
     const fromPlant = plantById.get(v.from);
     const toPlant = plantById.get(v.to);
 

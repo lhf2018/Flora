@@ -11,7 +11,7 @@
 | Studio 选路径出树 | ✅ | 页内浏览 + `POST /api/analyze` |
 | 情绪全景 + 诊断抽屉 | ✅ | Canvas；报告 / 热点 / 结构标记 |
 | 点株下钻 | ✅ | `focusPath` + 面包屑；子路径再分析 |
-| 叙事目标株数 | ✅ | 默认约 12；过少下钻；过多按父目录成簇，ui 株优先留 |
+| 叙事目标株数 | ✅ | 默认约 12；过少下钻有子结构的目录；扁平小包保持一株；过多按父目录成簇，ui 株优先留 |
 | 物种造型（按语言） | ✅ | 造型=语言，颜色=健康；见 §4.4 |
 | JS/TS Adapter | ✅ | import/require/dynamic；跳过 type-only；包名 + paths |
 | Python / Go / JVM Adapter | ✅ | 见 §5.1；Maven 反应器与 npm 仓可并存 |
@@ -25,7 +25,10 @@
 | 布局缓存 | ✅ | 小图新鲜布局，大图读缓存 |
 | tsconfig paths 别名 | ✅ | `@/` 等解析到工作区内模块 |
 | workspace 声明依赖边 | ✅ | package.json deps 补全漏边；纠孤儿误报 |
+| HTTP/API 跨语言藤 | ✅ | fetch/axios ↔ Spring/Express/FastAPI/Go；不参与循环判定 |
+| 健康趋势 | ✅ | 对比 `.flora` 历史帧：下滑 / 回升 / 新循环 / 持续枯萎 |
 | PR 双花园对比 | ✅ | 分支 tip + Studio 下拉；`GET /api/branches` |
+| 回归测试 | ✅ | `pnpm test`：sample-monorepo、HTTP 藤、趋势、孤儿启发式 |
 | 每日推送 PNG / webhook | ❌ | 未做 |
 | Web Component / React 包 | ❌ | 尚未封装自定义元素 |
 | 覆盖率驱动枯萎 | 部分 | 有 lcov 则接入；无则不误杀 |
@@ -76,7 +79,7 @@ flora/
 ┌─────────────────────────────────────────┐
 │  Flora Studio                           │
 │     [ 浏览文件夹… ]  或粘贴路径          │
-│     聚合粒度 · 叙事株数 · 开始生长       │
+│     一株代表什么 · 大约几棵 · 开始生长       │
 │     下钻面包屑 · Base/Head · 双花园      │
 │     分析摘要 / 模块列表 / 最近项目        │
 └─────────────────────────────────────────┘
@@ -137,12 +140,13 @@ flora/
 中间格式字段（实现以 `@flora/core` 类型为准）：
 
 - `meta`：projectId / commit / branch / capturedAt / rootPath / strategy / notes
-- `plants[]`：id、label、path、layer、**species**、**languages**、metrics、state、violations、dependsOn、dependedBy、cycleWith
-- `vines[]`：from / to / weight / strength / kind(`normal|illegal|cycle`)
+- `plants[]`：id、label、path、layer、**species**、**languages**、metrics、state、violations、dependsOn、dependedBy、cycleWith、**trend**
+- `vines[]`：from / to / weight / strength / kind(`normal|illegal|cycle`) / **source**(`import|workspace|http`) / httpPaths
 - `pollutions[]`：error 违规 epicenter
 - `layout.positions`：稳定坐标（画布逻辑尺寸约 **1280×860**）
 - `report`：摘要 KPI、循环组、热点（含结构腐化）、耦合 Top  
-- plant `metrics` 可选：`instability` / `godModule` / `orphan` / `hotCore`  
+- plant `metrics` 可选：`instability` / `godModule` / `orphan` / `hotCore` / **healthDelta**
+- plant **trend**：相对近期帧的下滑 / 回升 / 新循环 / 持续枯萎  
 
 ### 4.1b `GardenDiff`（PR 对比）
 
@@ -229,7 +233,7 @@ interface FrameDelta {
 2. npm / pnpm workspaces：包多 → package；**包少（≤3）或总株数 &lt; 目标 → 自动下钻**到 `src/*` / features / 包内一级目录；扁平 `src/*.ts`（以及 `.py` / `.go` / `.java`）→ **按文件成株**。名为 `src` / `lib` / `app` 的容器会再展开，标签去掉这层目录名  
 3. **Maven / Gradle 反应器**（根上 ≥2 个子模块）：子模块各一株，并带上同级 `package.json` 前端包，以及各模块 `src/main/resources/static/<app>`（有 js/html 才算）。这样 Java 仓不会把页面吃掉，也不会只剩枫树  
 4. 下钻单个 JVM 模块：从 `src/main/java|kotlin` 起，跳过只有一个子目录的包前缀（`com` / `lhf` …），停在第一个分叉或源文件层。模块根上的静态前端仍作为 `ui` 株留下  
-5. **叙事目标株数**（默认 12，可调 4–36）：过少继续下钻；过多按**父目录**成簇，而不是收成一棵「其余」。不把仓库根、`static` / `resources` 整组合并（否则簇路径会吞掉别的株）。兜底折叠时 **ui 株优先保留**  
+5. **叙事目标株数**（默认 12，可调 4–36）：过少继续下钻到 features / 多模块；**扁平小包**（不足 8 个源文件、无真实子目录）保持一株。过多按**父目录**成簇，而不是收成一棵「其余」。不把仓库根、`static` / `resources` 整组合并（否则簇路径会吞掉别的株）。兜底折叠时 **ui 株优先保留**  
 6. 再否则：Python / Go、功能目录、一级目录；最后整仓一株  
 
 **文件粒度**：扫描含 `.java` / `.kt` 在内的源码，跳过 `src/test`。人数最多的语言封顶 24，其余语言最多 40，并按一级目录轮转取样，避免 DFS 先扫完 Java 就把前端挤出画面。
@@ -335,11 +339,13 @@ pnpm --filter @flora/cli start compare <abs> -- --base main --head feature/x --c
 
 ## 6. Render
 
-- 2D Canvas；分层带标签；选中/悬停高亮相关藤、淡化其余  
+- 2D Canvas；分层带标签（左侧胶囊，不压植株）；选中/悬停高亮相关藤、淡化其余  
+- HTTP 藤青绿点线；循环紫色虚线；违规偏红  
+- 健康下滑的植株带小三角标记；抽屉展示趋势文案  
 - 物种剪影 + 健康色；图例在画布左上（健康色一行 + 当前物种一行）  
 - 对比模式：`highlightIds` 光晕、`badges` 角标、`title` 角标标题；双画布共用布局对齐  
 - 「今日花园」状态栏与时间轴为舞台底部独立条，不叠在画布上  
-- 诊断抽屉：健康度/覆盖率/耦合/活跃度、文件与扇入扇出、违规、依赖双向列表、物种与语言占比、**下钻此株**  
+- 诊断抽屉：健康度/**趋势**/覆盖率/耦合/活跃度、文件与扇入扇出、违规、依赖双向列表（HTTP 边标注）、物种与语言占比、**下钻此株**  
 
 明确不做：全 3D、卡片 dashboard、积分游戏。
 

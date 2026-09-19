@@ -21,7 +21,9 @@ sample-monorepo/
 
 - 约 **5** 株植物（4 个 JS workspace + 1 个 Python）  
 - **循环藤**：order ↔ payment ↔ domain  
-- **违规藤** + **污染扩散**；notes 含结构腐化 / 规则加厚  
+- **HTTP 藤**：web `fetch /api/wallet/charge` → py_wallet；web `fetch /api/orders` 会叠在已有 web→order import 上  
+- **违规藤** + **污染扩散**；notes 含结构腐化 / 规则加厚 / HTTP 藤蔓  
+- 小 Python 包 **不会**被拆成 billing/ledger 文件株  
 - Adapter：`javascript` / `python`  
 
 ## 怎么跑
@@ -35,6 +37,6 @@ pnpm analyze:sample
 pnpm --filter @flora/cli start analyze G:/code/Flora/examples/sample-monorepo
 ```
 
-Studio：`pnpm studio` → 浏览到本目录 → 可调叙事株数 → **开始生长**。
+Studio：`pnpm studio` → 浏览到本目录 → 可调「大约几棵」→ **开始生长**。
 
 本目录若未单独 `git init`，时间轴 / compare 请对**有 git 的真实仓库**使用；仅测 analyze 时不必是 git 仓。

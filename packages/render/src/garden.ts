@@ -37,9 +37,10 @@ export interface GardenRendererOptions {
   title?: string;
 }
 
-function vineColor(kind: Vine["kind"]): string {
-  if (kind === "cycle") return FloraTokens.cycle;
-  if (kind === "illegal") return FloraTokens.illegal;
+function vineColor(vine: Vine): string {
+  if (vine.kind === "cycle") return FloraTokens.cycle;
+  if (vine.kind === "illegal") return FloraTokens.illegal;
+  if (vine.source === "http") return FloraTokens.water;
   return FloraTokens.vineNormal;
 }
 
@@ -310,7 +311,6 @@ export class GardenRenderer {
       if (!layers.has(key)) layers.set(key, []);
       layers.get(key)!.push(pos.y);
     }
-    const ctx = this.ctx;
     const labels: Record<string, string> = {
       ui: "UI 层",
       application: "应用层",
@@ -318,21 +318,49 @@ export class GardenRenderer {
       infra: "基础设施",
       default: "模块",
     };
+    const rows = [...layers.entries()]
+      .map(([layer, ys]) => ({
+        layer,
+        y: ys.reduce((a, b) => a + b, 0) / ys.length,
+        minY: Math.min(...ys),
+      }))
+      .sort((a, b) => a.y - b.y);
+
+    const ctx = this.ctx;
     ctx.save();
-    for (const [layer, ys] of layers) {
-      const y = ys.reduce((a, b) => a + b, 0) / ys.length;
-      ctx.fillStyle = "rgba(42,42,40,0.28)";
-      ctx.font = "600 13px 'Segoe UI', 'PingFang SC', sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText(labels[layer] ?? layer, 48, y - 36);
-      ctx.strokeStyle = "rgba(42,42,40,0.08)";
+    const labelX = 14;
+    const minGap = 24;
+    let lastLabelBottom = 36;
+    for (const row of rows) {
+      const text = labels[row.layer] ?? row.layer;
+      ctx.font = "600 11px 'Segoe UI', 'PingFang SC', sans-serif";
+      const tw = ctx.measureText(text).width;
+      const pillW = tw + 14;
+      const pillH = 20;
+      let ly = row.minY - 28;
+      ly = Math.max(lastLabelBottom + minGap, ly);
+      ly = Math.max(44, Math.min(size.height - 36, ly));
+      lastLabelBottom = ly + pillH / 2;
+
+      ctx.strokeStyle = "rgba(42,42,40,0.07)";
       ctx.lineWidth = 1;
-      ctx.setLineDash([4, 6]);
+      ctx.setLineDash([4, 7]);
       ctx.beginPath();
-      ctx.moveTo(48, y - 28);
-      ctx.lineTo(size.width - 48, y - 28);
+      ctx.moveTo(labelX + pillW + 10, row.y);
+      ctx.lineTo(size.width - 40, row.y);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      roundRect(ctx, labelX, ly - pillH / 2, pillW, pillH, 8);
+      ctx.fillStyle = "rgba(250,248,242,0.92)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(42,42,40,0.08)";
+      ctx.stroke();
+      ctx.fillStyle = "rgba(42,42,40,0.52)";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, labelX + 7, ly);
+      ctx.textBaseline = "alphabetic";
     }
     ctx.restore();
   }
@@ -392,10 +420,11 @@ export class GardenRenderer {
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.bezierCurveTo(c1x, c1y, c2x, c2y, b.x, b.y);
-      ctx.strokeStyle = vineColor(vine.kind);
+      ctx.strokeStyle = vineColor(vine);
       ctx.lineWidth = (related ? 2.4 : 1.2) + vine.strength * (related ? 4.5 : 3);
       ctx.globalAlpha = dim ? 0.12 : vine.kind === "cycle" ? 0.9 : related ? 0.85 : 0.4;
       if (vine.kind === "cycle") ctx.setLineDash([7, 5]);
+      else if (vine.source === "http") ctx.setLineDash([3, 7]);
       else ctx.setLineDash([]);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -416,7 +445,7 @@ export class GardenRenderer {
           tipY - Math.sin(ang + 0.4) * 10,
         );
         ctx.closePath();
-        ctx.fillStyle = vineColor(vine.kind);
+        ctx.fillStyle = vineColor(vine);
         ctx.globalAlpha = vine.kind === "cycle" ? 0.9 : 0.55;
         ctx.fill();
       }
@@ -500,6 +529,19 @@ export class GardenRenderer {
     drawSpeciesShape(ctx, species, color, shapeScale, plant.state, time);
     ctx.restore();
 
+    if (
+      plant.trend &&
+      (plant.trend.kind === "declining" || plant.trend.kind === "chronic-wilt")
+    ) {
+      ctx.beginPath();
+      ctx.fillStyle = FloraTokens.wilting;
+      ctx.moveTo(pos.x + r * 0.72, pos.y - r * 0.1);
+      ctx.lineTo(pos.x + r * 1.08, pos.y - r * 0.52);
+      ctx.lineTo(pos.x + r * 0.36, pos.y - r * 0.52);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     if (plant.state === "blooming" && species !== "blossom") {
       const pulse = 5 + Math.sin(time / 280) * 1.8;
       ctx.beginPath();
@@ -578,6 +620,9 @@ export class GardenRenderer {
       { color: FloraTokens.entangled, label: "缠绕" },
       { color: FloraTokens.cycle, label: "循环藤" },
     ];
+    if (this.snapshot.vines.some((v) => v.source === "http")) {
+      healthItems.push({ color: FloraTokens.water, label: "HTTP藤" });
+    }
 
     const present = new Set(this.snapshot.plants.map((p) => speciesOf(p)));
     const speciesItems = [...present];

@@ -140,8 +140,8 @@ function fitInside(positions: Record<string, { x: number; y: number }>) {
     maxX = Math.max(maxX, p.x);
     maxY = Math.max(maxY, p.y);
   }
-  // room for legend (top), name plates (bottom), and side labels
-  const padL = 150;
+  // room for legend (top), name plates (bottom), and left layer-label rail
+  const padL = 188;
   const padR = 110;
   const padT = 150;
   const padB = 140;

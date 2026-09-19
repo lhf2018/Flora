@@ -31,10 +31,9 @@ pnpm dev:studio     # Vite 热更新；分析 API 仍需 `pnpm studio`
 ### 2.1 长出今日花园
 
 1. **浏览文件夹…** 选仓库根（或粘贴绝对路径）  
-2. 聚合粒度默认 **自动**。Maven 仓会先出模块，并把 `src/main/resources/static` 下的前端单独成株。可调 **叙事株数**（约 4–24）：过少继续下钻，过多按父目录成簇  
-3. **开始生长**  
-4. 点株 → 抽屉（按钮在标题下）→ **下钻此株** 或双击；面包屑返回。下钻 Java 模块会落到 `hub` / `mix` 这类包，而不是 `src` 或 `com`  
-5. 左侧：分析摘要 / 热点 / 模块列表  
+2. 上方填路径（或点「浏览」）→ **开始生长**。默认「自动」切法；点顶栏 **显示** 可改「一株代表什么 / 大约几棵」。  
+3. 生长后左侧出现 **摘要**（可收起）；点株打开诊断抽屉 → **下钻此株**  
+4. 可选：底部 **生成回放**；顶栏 **对比** 选分支 → 双花园
 
 产物：目标仓 `.flora/snapshot.json`。notes 会写规则、地图、污染、结构腐化、叙事目标等。
 
@@ -68,11 +67,13 @@ pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feat
 | 灰白缩小 | 濒死（严重违规等） |
 | 根须缠绕 | 循环、过高耦合、上帝模块 / 不稳定 |
 | 紫色虚线藤 | 循环依赖 |
+| 青绿点线藤 | HTTP/API 契约（fetch / Spring / FastAPI 等，跨语言） |
 | 偏红违规藤 | 跨层 / entry-only / import 黑名单 |
 | 地面暗斑 | 污染源及沿藤扩散的次生污染 |
+| 植株旁小三角 | 健康趋势下滑（相对近期快照） |
 | 「其余 · N」 / 「名 · 名 +N」 | 叙事折叠：同级模块合成一株，不会整园收成一棵 `src` |
 
-点选一株：相关藤加粗。抽屉含健康 / 覆盖 / 耦合 / 活跃、扇入出、**不稳定性 I**、结构标记、违规与双向依赖。左侧「问题热点」优先列上帝模块、孤儿、缠绕与枯萎。
+点选一株：相关藤加粗。抽屉含健康 / **趋势** / 覆盖 / 耦合 / 活跃、扇入出、**不稳定性 I**、结构标记、违规与双向依赖（HTTP 边会标 HTTP）。左侧「问题热点」优先列上帝模块、孤儿、缠绕、枯萎与健康下滑。
 
 ---
 
@@ -103,13 +104,13 @@ pnpm --filter @flora/cli start compare G:/code/my-app -- --base main --head feat
 | `flora.rules.yaml` | 分层、禁止边、入口约束、import 黑名单；声明 layers 会**自动加厚** |
 | `flora.modules.yaml` | 合并 / 拆分 / 忽略，或强制粒度 |
 
-语法见 [CONFIG.md](./CONFIG.md)。叙事株数用 Studio 滑杆或 CLI `--target`，不写在 yaml 里。
+语法见 [CONFIG.md](./CONFIG.md)。「大约几棵」用 Studio 滑杆或 CLI `--target`，不写在 yaml 里。
 
 ---
 
 ## 6. 示例仓
 
-`examples/sample-monorepo`：workspaces、故意循环、跨层规则、Python、模块地图。
+`examples/sample-monorepo`：workspaces、故意循环、跨层规则、Python、模块地图、前端 `fetch` ↔ 订单路由 / Python wallet。
 
 ```bash
 pnpm analyze:sample
@@ -138,13 +139,13 @@ pnpm analyze:sample
 ## 8. 常见问题
 
 **路径不对 / 植株过少**  
-用绝对路径或 Studio 浏览。自动粒度下调高「叙事株数」，或点株下钻。
+用绝对路径或 Studio 浏览。切法选「自动」，把「大约几棵」调高，或点株下钻。
 
 **满园都是 Java，或完全看不到 Java**  
-用 **自动**，不要用「文件」。文件粒度若扫进全部 `.java`，枫树会盖住前端；自动会同时留下 Maven 模块和静态前端。下钻某一模块才进入 Java 包。若仍只有一种语言，先确认粒度不是「文件」，再重新「开始生长」（旧快照不会自己变）。
+用 **自动**，不要用「按源文件」。文件切法若扫进全部 `.java`，枫树会盖住前端；自动会同时留下 Maven 模块和静态前端。下钻某一模块才进入 Java 包。若仍只有一种语言，先确认不是「按源文件」，再重新「开始生长」（旧快照不会自己变）。
 
 **植株过多 / 图面挤**  
-调低叙事株数；或 `-g package`；或用 `flora.modules.yaml` merge。
+把「大约几棵」调低；或改成「按软件包」；或用 `flora.modules.yaml` merge。
 
 **对比失败**  
 需为 git 仓；选两个不同分支；可「刷新分支」。
@@ -153,7 +154,7 @@ pnpm analyze:sample
 外部包与 `import type` 不计。workspace 会用 `package.json` 补软边。仍缺则检查相对路径 / 包名 / tsconfig paths。
 
 **边界不对**  
-`flora.modules.yaml` 的 merge/split/ignore，或改粒度 / 下钻。
+`flora.modules.yaml` 的 merge/split/ignore，或改「一株代表什么」、点株下钻。
 
 **时间轴很慢**  
 真实提交切片要多次 worktree 分析。可 `--approx` 或减少 `--frames`。

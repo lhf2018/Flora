@@ -262,6 +262,8 @@ export function remapEdges(
   const weights = new Map<string, number>();
   const deep = new Map<string, boolean>();
   const specs = new Map<string, Set<string>>();
+  const httpPaths = new Map<string, Set<string>>();
+  const sources = new Map<string, NonNullable<ModuleGraph["edges"][number]["source"]>>();
 
   for (const e of edges) {
     let from = e.from;
@@ -285,6 +287,17 @@ export function remapEdges(
       for (const s of e.importSpecs) set.add(s);
       specs.set(key, set);
     }
+    if (e.httpPaths?.length) {
+      const set = httpPaths.get(key) ?? new Set<string>();
+      for (const s of e.httpPaths) set.add(s);
+      httpPaths.set(key, set);
+    }
+    const src = e.source ?? "import";
+    const prevSrc = sources.get(key);
+    const rank: Record<string, number> = { import: 3, workspace: 2, http: 1 };
+    if (!prevSrc || (rank[src] ?? 0) > (rank[prevSrc] ?? 0)) {
+      sources.set(key, src);
+    }
   }
 
   return [...weights.entries()].map(([key, weight]) => {
@@ -295,6 +308,8 @@ export function remapEdges(
       weight,
       deep: deep.get(key),
       importSpecs: specs.has(key) ? [...specs.get(key)!] : undefined,
+      httpPaths: httpPaths.has(key) ? [...httpPaths.get(key)!] : undefined,
+      source: sources.get(key),
     };
   });
 }

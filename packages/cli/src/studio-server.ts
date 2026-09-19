@@ -482,12 +482,12 @@ function devFallbackHtml(port: number): string {
           <button type="button" id="browser-choose">选择此文件夹</button>
         </div>
       </div>
-      <label>聚合粒度</label>
+      <label>一株代表什么</label>
       <select id="granularity">
-        <option value="auto">自动</option>
-        <option value="package">package</option>
-        <option value="directory">一级目录</option>
-        <option value="file">文件（采样）</option>
+        <option value="auto">自动（推荐）</option>
+        <option value="package">按软件包</option>
+        <option value="directory">按顶层文件夹</option>
+        <option value="file">按源文件</option>
       </select>
       <button id="grow">开始生长</button>
       <div class="notes" id="notes"></div>

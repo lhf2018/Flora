@@ -7,6 +7,8 @@ export type {
   GardenReport,
   GardenSnapshot,
   GardenTimeline,
+  HealthTrend,
+  HealthTrendKind,
   LayoutCache,
   LayoutHint,
   ModuleGraph,
@@ -17,6 +19,7 @@ export type {
   Pollution,
   Vine,
   VineKind,
+  VineSource,
   Violation,
 } from "./types.js";
 export {
@@ -88,3 +91,16 @@ export {
 } from "./compare.js";
 export type { GardenDiff, GitBranchInfo, PlantChange, VineChange } from "./compare.js";
 export { ALL_ADAPTERS, adapterForFile } from "./adapters.js";
+export {
+  buildHttpEdges,
+  extractHttpClients,
+  extractHttpRoutes,
+  httpRoutesMatch,
+  normalizeHttpPath,
+} from "./api-edges.js";
+export {
+  annotateSnapshotsWithTrends,
+  applyHealthTrends,
+  computeHealthTrend,
+  loadHistorySnapshots,
+} from "./health-trend.js";

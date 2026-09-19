@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { exists, readJson, writeJson } from "./fs.js";
 import { analyze } from "./analyze.js";
 import { analyzeAtRef } from "./ref-analyze.js";
+import { annotateSnapshotsWithTrends } from "./health-trend.js";
 import type {
   AggregateGranularity,
   FrameDelta,
@@ -627,6 +628,12 @@ export async function buildTimeline(options: {
       const date = snap.meta.capturedAt.slice(0, 10);
       writeJson(path.join(rootPath, `.flora/history/${date}.json`), snap);
     }
+  }
+
+  annotateSnapshotsWithTrends(snapshots);
+  for (const snap of snapshots) {
+    const date = snap.meta.capturedAt.slice(0, 10);
+    writeJson(path.join(rootPath, `.flora/history/${date}.json`), snap);
   }
 
   const frames = snapshots.map((s, idx) => {

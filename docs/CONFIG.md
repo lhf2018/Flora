@@ -156,7 +156,7 @@ aliases:                 # 预留：路径别名提示（与 tsconfig paths 互�
 | 污染扩散 | error 违规与上帝模块为源 | 沿藤 BFS 衰减暗斑 |
 | 模块边界 | modules 地图 + auto 叙事 + 目标株数 | 植株数量与标签 |
 
-**叙事株数**（Studio 滑杆 / CLI `--target` / API `targetPlants`）：不属于 yaml。只在 **auto** 发现之后生效：过少则下钻，过多则把同级目录收成簇。簇名用成员名（如 `cycles · state +8`），不会叫 `src`。`ui` 层植株在兜底折叠时优先保留。Maven 多模块、Java 包、静态前端也由发现逻辑决定，不写在这份 yaml 里。
+**大约几棵**（Studio 滑杆 / CLI `--target` / API `targetPlants`）：不属于 yaml。只在 **auto**（「自动」）发现之后生效：过少则下钻到**有真实子结构**的目录（features / 多模块），过小的语言包（扁平的几个 `.py` / `.go` 文件）保持一株，避免拆成假孤儿。过多则把同级目录收成簇。簇名用成员名（如 `cycles · state +8`），不会叫 `src`。`ui` 层植株在兜底折叠时优先保留。Maven 多模块、Java 包、静态前端也由发现逻辑决定，不写在这份 yaml 里。
 
 **孤儿判定**（刻意保守，减少误报）：
 

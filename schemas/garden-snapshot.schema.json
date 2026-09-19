@@ -89,6 +89,8 @@
         "to": { "type": "string" },
         "strength": { "type": "number" },
         "kind": { "type": "string", "enum": ["normal", "illegal", "cycle"] },
+        "source": { "type": "string", "enum": ["import", "workspace", "http"] },
+        "httpPaths": { "type": "array", "items": { "type": "string" } },
         "cycleGroupId": { "type": "string" }
       }
     },

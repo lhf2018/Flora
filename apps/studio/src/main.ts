@@ -93,72 +93,89 @@ app.innerHTML = `
   <div class="shell">
     <header class="topbar">
       <div class="brand">Flora</div>
-      <div class="tagline">选一个路径，种下一座架构花园</div>
-    </header>
-    <div class="body">
-      <aside class="sidebar">
-        <label class="field" for="path">项目路径</label>
-        <input id="path" placeholder="粘贴绝对路径，或点浏览" />
-        <button class="secondary" id="browse" type="button">浏览文件夹…</button>
-        <div class="browser" id="browser" hidden>
-          <div class="browser-toolbar">
-            <button type="button" class="ghost" id="browser-up" title="上级">↑</button>
-            <div class="browser-path" id="browser-path"></div>
-          </div>
-          <div class="browser-list" id="browser-list"></div>
-          <div class="browser-actions">
-            <button type="button" class="secondary" id="browser-cancel">取消</button>
-            <button type="button" id="browser-choose">选择此文件夹</button>
-          </div>
-        </div>
-
-        <label class="field" for="granularity">聚合粒度</label>
-        <select id="granularity">
-          <option value="auto">自动</option>
-          <option value="package">package / workspace</option>
-          <option value="directory">一级目录</option>
-          <option value="file">文件（采样）</option>
-        </select>
-
-        <label class="field" for="target-plants">叙事株数 <span id="target-plants-val">12</span></label>
-        <input type="range" id="target-plants" min="4" max="24" value="12" step="1" />
-        <p class="field-hint">自动粒度下：过少则下钻，过多则折叠为「其余」</p>
-
+      <div class="top-grow">
+        <input id="path" placeholder="粘贴代码库路径，或点浏览" />
+        <button class="secondary" id="browse" type="button">浏览</button>
         <button id="grow" type="button">开始生长</button>
+      </div>
+      <div class="top-tools">
+        <details class="menu" id="menu-display">
+          <summary>显示</summary>
+          <div class="menu-panel">
+            <label class="field" for="granularity">一株代表什么</label>
+            <select id="granularity" aria-describedby="granularity-hint">
+              <option value="auto">自动（推荐）</option>
+              <option value="package">按软件包</option>
+              <option value="directory">按顶层文件夹</option>
+              <option value="file">按源文件</option>
+            </select>
+            <p class="field-hint" id="granularity-hint"></p>
+            <div id="target-plants-wrap">
+              <label class="field" for="target-plants">大约几棵 <span id="target-plants-val">12</span></label>
+              <input type="range" id="target-plants" min="4" max="24" value="12" step="1" />
+              <p class="field-hint" id="target-plants-hint">只在「自动」时有效：花园里大约出现这么多棵。</p>
+            </div>
+          </div>
+        </details>
+        <details class="menu" id="menu-compare">
+          <summary>对比</summary>
+          <div class="menu-panel menu-panel-wide">
+            <p class="compare-hint">对比两个分支各自最新 tip（已提交树）</p>
+            <label class="field" for="base-branch">Base</label>
+            <select id="base-branch" disabled>
+              <option value="">先选择项目…</option>
+            </select>
+            <label class="field" for="head-branch">Head</label>
+            <select id="head-branch" disabled>
+              <option value="">先选择项目…</option>
+            </select>
+            <div class="menu-row">
+              <button class="secondary" id="compare" type="button">对比双花园</button>
+              <button class="ghost" id="refresh-branches" type="button">刷新</button>
+              <button class="ghost" id="exit-compare" type="button" hidden>退出</button>
+            </div>
+          </div>
+        </details>
+        <button class="ghost" id="toggle-insights" type="button" hidden>摘要</button>
+      </div>
+    </header>
 
+    <div class="browser" id="browser" hidden>
+      <div class="browser-toolbar">
+        <button type="button" class="ghost" id="browser-up" title="上级">↑</button>
+        <div class="browser-path" id="browser-path"></div>
+        <button type="button" class="secondary" id="browser-cancel">取消</button>
+        <button type="button" id="browser-choose">选择此文件夹</button>
+      </div>
+      <div class="browser-list" id="browser-list"></div>
+    </div>
+
+    <div class="recent-strip" id="recent-strip">
+      <span class="recent-label">最近</span>
+      <div class="recent" id="recent"></div>
+    </div>
+
+    <div class="body">
+      <aside class="insights" id="insights" hidden>
+        <div class="insights-head">
+          <strong>摘要</strong>
+          <button type="button" class="ghost" id="close-insights">收起</button>
+        </div>
         <div class="drill-bar" id="drill-bar" hidden>
           <div class="drill-title">下钻路径</div>
           <div class="breadcrumbs" id="breadcrumbs"></div>
           <div class="drill-focus" id="drill-focus"></div>
           <p class="field-hint">画布上双击植株也可下钻</p>
         </div>
-
-        <div class="compare-box">
-          <div class="compare-title">PR 双花园</div>
-          <p class="compare-hint">对比两个分支各自最新 tip（已提交树）</p>
-          <label class="field" for="base-branch">Base 分支</label>
-          <select id="base-branch" disabled>
-            <option value="">先选择项目路径…</option>
-          </select>
-          <label class="field" for="head-branch">Head 分支</label>
-          <select id="head-branch" disabled>
-            <option value="">先选择项目路径…</option>
-          </select>
-          <button class="secondary" id="compare" type="button">对比双花园</button>
-          <button class="ghost" id="refresh-branches" type="button">刷新分支</button>
-          <button class="ghost" id="exit-compare" type="button" hidden>退出对比</button>
-        </div>
-
-        <div class="notes" id="notes"></div>
-
         <div id="report" class="report" hidden></div>
-
         <label class="field" id="plant-list-label" hidden>模块列表</label>
         <div class="plant-list" id="plant-list"></div>
-
-        <label class="field">最近项目</label>
-        <div class="recent" id="recent"></div>
+        <details class="notes-fold">
+          <summary>分析日志</summary>
+          <div class="notes" id="notes"></div>
+        </details>
       </aside>
+
       <main class="stage">
         <div class="stage-main">
           <div class="stage-canvas" id="stage-single">
@@ -166,7 +183,7 @@ app.innerHTML = `
             <div class="empty-hint" id="empty">
               <div>
                 <strong>还没有花园</strong>
-                选择代码库根目录后开始构建
+                在上方选一个代码库路径，然后开始生长
               </div>
             </div>
             <aside class="drawer" id="drawer"></aside>
@@ -214,8 +231,11 @@ const canvasHead = document.querySelector<HTMLCanvasElement>("#garden-head")!;
 const stageSingle = document.querySelector<HTMLElement>("#stage-single")!;
 const stageCompare = document.querySelector<HTMLElement>("#stage-compare")!;
 const granularityEl = document.querySelector<HTMLSelectElement>("#granularity")!;
+const granularityHintEl = document.querySelector<HTMLParagraphElement>("#granularity-hint")!;
 const targetPlantsEl = document.querySelector<HTMLInputElement>("#target-plants")!;
 const targetPlantsVal = document.querySelector<HTMLSpanElement>("#target-plants-val")!;
+const targetPlantsWrap = document.querySelector<HTMLElement>("#target-plants-wrap")!;
+const targetPlantsHintEl = document.querySelector<HTMLParagraphElement>("#target-plants-hint")!;
 const drillBar = document.querySelector<HTMLElement>("#drill-bar")!;
 const breadcrumbsEl = document.querySelector<HTMLElement>("#breadcrumbs")!;
 const drillFocusEl = document.querySelector<HTMLElement>("#drill-focus")!;
@@ -229,6 +249,12 @@ const timelineBar = document.querySelector<HTMLElement>("#timeline-bar")!;
 const timelineRange = document.querySelector<HTMLInputElement>("#timeline-range")!;
 const timelineDate = document.querySelector<HTMLSpanElement>("#timeline-date")!;
 const timelinePlayBtn = document.querySelector<HTMLButtonElement>("#timeline-play")!;
+const insightsEl = document.querySelector<HTMLElement>("#insights")!;
+const toggleInsightsBtn = document.querySelector<HTMLButtonElement>("#toggle-insights")!;
+const closeInsightsBtn = document.querySelector<HTMLButtonElement>("#close-insights")!;
+const recentStrip = document.querySelector<HTMLElement>("#recent-strip")!;
+const menuDisplay = document.querySelector<HTMLDetailsElement>("#menu-display")!;
+const menuCompare = document.querySelector<HTMLDetailsElement>("#menu-compare")!;
 
 interface DrillFrame {
   label: string;
@@ -252,6 +278,27 @@ let drillStack: DrillFrame[] = [];
 targetPlantsEl.addEventListener("input", () => {
   targetPlantsVal.textContent = targetPlantsEl.value;
 });
+
+const GRANULARITY_HINT: Record<string, string> = {
+  auto: "一棵 ≈ 一个模块。包太少会往里看一层，太多会收成簇。大约几棵用下面滑杆。",
+  package: "一个 npm / Maven / Python 包 = 一棵。适合看整个仓库的包关系。",
+  directory: "仓库根下每个文件夹一棵。包结构不标准、没有 workspace 时用。",
+  file: "每个源文件一棵（会抽样）。大仓很挤，Java 仓容易一种语言占满画面。",
+};
+
+function syncGranularityUi() {
+  const mode = granularityEl.value || "auto";
+  granularityHintEl.textContent = GRANULARITY_HINT[mode] ?? GRANULARITY_HINT.auto!;
+  const isAuto = mode === "auto";
+  targetPlantsEl.disabled = !isAuto;
+  targetPlantsWrap.classList.toggle("is-disabled", !isAuto);
+  targetPlantsHintEl.textContent = isAuto
+    ? "只在「自动」时有效：花园里大约出现这么多棵。"
+    : "当前按固定切法，不使用「大约几棵」。改回「自动」后才会生效。";
+}
+
+granularityEl.addEventListener("change", syncGranularityUi);
+syncGranularityUi();
 
 function targetPlants(): number {
   return Number(targetPlantsEl.value) || 12;
@@ -282,6 +329,7 @@ function renderBreadcrumbs() {
     return;
   }
   drillBar.hidden = false;
+  setInsightsOpen(true);
   breadcrumbsEl.innerHTML = drillStack
     .map(
       (f, i) =>
@@ -317,11 +365,14 @@ async function loadRecent() {
   };
   const box = document.querySelector("#recent")!;
   box.innerHTML = "";
-  for (const r of data.recent ?? []) {
+  const items = data.recent ?? [];
+  recentStrip.hidden = items.length === 0;
+  for (const r of items) {
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = r.path;
-    b.title = r.projectId;
+    const parts = r.path.replace(/\\/g, "/").split("/").filter(Boolean);
+    b.textContent = parts[parts.length - 1] ?? r.path;
+    b.title = r.path;
     b.addEventListener("click", () => {
       pathEl.value = r.path;
       void loadBranches(r.path, false);
@@ -329,6 +380,44 @@ async function loadRecent() {
     });
     box.appendChild(b);
   }
+}
+
+function setInsightsOpen(open: boolean) {
+  insightsEl.hidden = !open;
+  toggleInsightsBtn.hidden = false;
+  toggleInsightsBtn.classList.toggle("is-active", open);
+  toggleInsightsBtn.textContent = open ? "收起摘要" : "摘要";
+  requestAnimationFrame(() => {
+    window.dispatchEvent(new Event("resize"));
+  });
+}
+
+/** After analyze: enable summary toggle but keep garden full-bleed by default. */
+function enableInsights() {
+  toggleInsightsBtn.hidden = false;
+  if (!insightsEl.hidden) return;
+  toggleInsightsBtn.textContent = "摘要";
+  toggleInsightsBtn.classList.remove("is-active");
+}
+
+function showInsights() {
+  enableInsights();
+  setInsightsOpen(true);
+}
+
+toggleInsightsBtn.addEventListener("click", () => {
+  setInsightsOpen(insightsEl.hidden);
+});
+closeInsightsBtn.addEventListener("click", () => setInsightsOpen(false));
+
+// only one menu open at a time
+for (const menu of [menuDisplay, menuCompare]) {
+  menu.addEventListener("toggle", () => {
+    if (!menu.open) return;
+    for (const other of [menuDisplay, menuCompare]) {
+      if (other !== menu) other.open = false;
+    }
+  });
 }
 
 document.querySelector("#browse")!.addEventListener("click", () => {
@@ -362,7 +451,7 @@ function closeBrowser() {
 async function openBrowser(start?: string) {
   const panel = document.querySelector<HTMLElement>("#browser")!;
   panel.hidden = false;
-  notesEl.textContent = "在列表中进入目录，然后点「选择此文件夹」";
+  barEl.textContent = "在列表中进入目录，然后点「选择此文件夹」";
   if (start) {
     try {
       await loadBrowser(start);
@@ -425,7 +514,11 @@ function renderBrowserEntries(entries: Array<{ name: string; path: string }>) {
   }
 }
 
-document.querySelector("#grow")!.addEventListener("click", () => void grow());
+document.querySelector("#grow")!.addEventListener("click", () => {
+  menuDisplay.open = false;
+  menuCompare.open = false;
+  void grow();
+});
 
 pathEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") void grow();
@@ -442,9 +535,11 @@ function depList(title: string, items: Plant["dependsOn"]) {
   }
   return `<div class="dep-block"><div class="dep-title">${title}</div>${items
     .map((d) => {
-      const cls = d.kind === "cycle" ? "dep cycle" : "dep";
+      const cls =
+        d.kind === "cycle" ? "dep cycle" : d.source === "http" ? "dep http" : "dep";
+      const tag = d.source === "http" ? "HTTP" : "";
       return `<button type="button" class="${cls}" data-id="${escapeHtml(d.id)}">
-        <span>${escapeHtml(d.label)}</span>
+        <span>${escapeHtml(d.label)}${tag ? ` · ${tag}` : ""}</span>
         <span class="w">×${d.weight}</span>
       </button>`;
     })
@@ -500,6 +595,17 @@ function showPlant(plant: Plant | null, sourceSnapshot?: GardenSnapshot | null) 
     <div class="species-line">${escapeHtml(speciesLabel(plant))} · ${escapeHtml(langMix(plant))}</div>
 
     ${meter("健康度", plant.metrics.health, healthKind)}
+    ${
+      plant.trend && plant.trend.kind !== "stable"
+        ? `<div class="trend-line trend-${escapeHtml(plant.trend.kind)}">${escapeHtml(
+            plant.trend.label,
+          )}${
+            plant.metrics.healthDelta != null && plant.trend.kind !== "new"
+              ? ` · Δ ${plant.metrics.healthDelta >= 0 ? "+" : ""}${Math.round(plant.metrics.healthDelta * 100)}`
+              : ""
+          }</div>`
+        : ""
+    }
     ${meter(
       plant.metrics.coverageKnown ? "覆盖率" : "覆盖率(未知)",
       plant.metrics.coverageKnown ? plant.metrics.coverage : 0,
@@ -566,6 +672,7 @@ function renderReport(s: GardenSnapshot) {
   const r = s.report;
   reportEl.hidden = false;
   plantListLabel.hidden = false;
+  enableInsights();
 
   const sc = r.stateCounts;
   reportEl.innerHTML = `
@@ -583,7 +690,11 @@ function renderReport(s: GardenSnapshot) {
       <span>濒死 ${sc.dying}</span>
       <span>缠绕 ${sc.entangled}</span>
     </div>
-    <div class="report-meta">${r.totalFiles} 文件 · ~${r.totalLoc} 行</div>
+    <div class="report-meta">${r.totalFiles} 文件 · ~${r.totalLoc} 行${
+      s.vines.some((v) => v.source === "http")
+        ? ` · HTTP藤 ${s.vines.filter((v) => v.source === "http").length}`
+        : ""
+    }</div>
     ${
       r.cycles.length
         ? `<div class="report-section"><div class="report-h">循环依赖</div>${r.cycles
@@ -632,7 +743,13 @@ function renderReport(s: GardenSnapshot) {
       <button type="button" class="plant-row state-${p.state}" data-id="${escapeHtml(p.id)}">
         <span class="dot"></span>
         <span class="name">${escapeHtml(p.label)}</span>
-        <span class="score">${Math.round(p.metrics.health * 100)}</span>
+        <span class="score">${Math.round(p.metrics.health * 100)}${
+          p.trend?.kind === "declining" || p.trend?.kind === "chronic-wilt"
+            ? "↓"
+            : p.trend?.kind === "recovering"
+              ? "↑"
+              : ""
+        }</span>
       </button>`,
     )
     .join("");
@@ -648,6 +765,8 @@ function renderReport(s: GardenSnapshot) {
 function renderDiffReport(diff: GardenDiffPayload) {
   reportEl.hidden = false;
   plantListLabel.hidden = false;
+  enableInsights();
+  setInsightsOpen(true);
   reportEl.innerHTML = `
     <div class="report-title">PR 花园对比</div>
     <div class="report-meta">${escapeHtml(diff.baseRef)} → ${escapeHtml(diff.headRef)}</div>
@@ -1208,12 +1327,15 @@ async function runAnalyze(opts: {
   });
   const data = (await res.json()) as AnalyzeResponse & { drilled?: boolean };
   if (!res.ok) {
-    notesEl.textContent = data.error || "分析失败";
+    const msg = data.error || "分析失败";
+    notesEl.textContent = msg;
+    barEl.textContent = msg;
     return null;
   }
   const snap = data.snapshot;
   if (!snap) {
     notesEl.textContent = "无快照返回";
+    barEl.textContent = "无快照返回";
     return null;
   }
 
@@ -1263,6 +1385,7 @@ async function drillInto(plant: Plant, snap: GardenSnapshot) {
   barEl.textContent = "点株下钻分析中…";
   const prevGranularity = granularityEl.value;
   if (same) granularityEl.value = "file";
+  syncGranularityUi();
   try {
     await runAnalyze({
       rootPath: projectRoot,
@@ -1271,6 +1394,7 @@ async function drillInto(plant: Plant, snap: GardenSnapshot) {
     });
   } finally {
     granularityEl.value = prevGranularity;
+    syncGranularityUi();
   }
 }
 
@@ -1286,10 +1410,20 @@ async function jumpDrill(idx: number) {
   applyGardenSnapshot(frame.snapshot);
 }
 
+function flashPathNeeded(message: string) {
+  barEl.textContent = message;
+  notesEl.textContent = message;
+  pathEl.focus();
+  pathEl.classList.remove("path-flash");
+  void pathEl.offsetWidth;
+  pathEl.classList.add("path-flash");
+  window.setTimeout(() => pathEl.classList.remove("path-flash"), 1200);
+}
+
 async function grow() {
   const rootPath = pathEl.value.trim();
   if (!rootPath) {
-    notesEl.textContent = "请先填写或选择路径";
+    flashPathNeeded("请先填写路径，或点「最近」里的项目 /「浏览」");
     return;
   }
   currentRoot = rootPath;
@@ -1297,6 +1431,9 @@ async function grow() {
   if (compareMode) exitCompareMode();
   notesEl.textContent = "构建中…";
   barEl.textContent = "探测结构 → 解析依赖 → 规则 → 布局…";
+  const growBtn = document.querySelector<HTMLButtonElement>("#grow")!;
+  growBtn.disabled = true;
+  growBtn.textContent = "生长中…";
   stopPlayback();
   try {
     const snap = await runAnalyze({
@@ -1304,7 +1441,12 @@ async function grow() {
       resetDrill: true,
       label: path.basenameLike(rootPath),
     });
-    if (!snap) return;
+    if (!snap) {
+      if (!barEl.textContent || barEl.textContent.includes("探测结构")) {
+        barEl.textContent = notesEl.textContent || "分析失败";
+      }
+      return;
+    }
     void loadBranches(rootPath, true);
     try {
       const tl = await fetch(
@@ -1335,7 +1477,12 @@ async function grow() {
       timelineBar.hidden = false;
     }
   } catch (err) {
-    notesEl.textContent = err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error ? err.message : String(err);
+    notesEl.textContent = msg;
+    barEl.textContent = msg;
+  } finally {
+    growBtn.disabled = false;
+    growBtn.textContent = "开始生长";
   }
 }
 

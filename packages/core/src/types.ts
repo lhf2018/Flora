@@ -22,6 +22,25 @@ export type PlantSpecies =
 
 export type VineKind = "normal" | "illegal" | "cycle";
 
+export type VineSource = "import" | "workspace" | "http";
+
+export type HealthTrendKind =
+  | "stable"
+  | "new"
+  | "declining"
+  | "recovering"
+  | "chronic-wilt"
+  | "new-cycle";
+
+export interface HealthTrend {
+  kind: HealthTrendKind;
+  label: string;
+  /** health now − previous frame */
+  delta: number;
+  /** consecutive frames in the same state */
+  consecutive: number;
+}
+
 export interface Violation {
   ruleId: string;
   message: string;
@@ -46,6 +65,8 @@ export interface PlantMetrics {
   importWeight: number;
   /** health 0..1 derived from state + metrics */
   health: number;
+  /** health now − previous history frame (if any) */
+  healthDelta?: number;
   /** Martin instability I = fanOut/(fanIn+fanOut) */
   instability?: number;
   /** structural smell flags */
@@ -59,6 +80,7 @@ export interface DependencyRef {
   label: string;
   weight: number;
   kind: VineKind;
+  source?: VineSource;
 }
 
 export interface Plant {
@@ -79,6 +101,8 @@ export interface Plant {
   dependedBy: DependencyRef[];
   /** other plants in the same cycle group */
   cycleWith: string[];
+  /** health vs recent timeline frames */
+  trend?: HealthTrend;
 }
 
 export interface Vine {
@@ -89,6 +113,10 @@ export interface Vine {
   weight: number;
   kind: VineKind;
   cycleGroupId?: string;
+  /** import graph vs HTTP/API contract */
+  source?: VineSource;
+  /** matched HTTP paths when source is http */
+  httpPaths?: string[];
 }
 
 export interface Pollution {
@@ -175,6 +203,8 @@ export interface ModuleGraph {
     /** resolved past package public entry */
     deep?: boolean;
     importSpecs?: string[];
+    source?: VineSource;
+    httpPaths?: string[];
   }>;
   strategy: string;
   notes: string[];

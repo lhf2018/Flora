@@ -14,9 +14,9 @@ pnpm studio
 
 浏览器打开 http://127.0.0.1:4173 ：
 
-1. **浏览文件夹…** → **开始生长**（可调「叙事株数」）  
-2. 点株 → 诊断抽屉 → **下钻此株**  
-3. 可选：底部 **生成回放**；侧栏选分支 → **对比双花园**（需 git）
+1. **浏览** / 粘贴路径 → **开始生长**（顶栏；「显示」「对比」在右侧菜单）  
+2. 点株 → 诊断抽屉 → **下钻此株**；需要报告时点顶栏 **摘要**  
+3. 可选：底部 **生成回放**；顶栏 **对比** → 双花园
 
 ```bash
 pnpm analyze:sample
@@ -51,15 +51,15 @@ pnpm --filter @flora/cli start compare <abs> -- --base main --head feature/x --c
 
 | 能力 | 说明 |
 |---|---|
-| 叙事粒度 | 自动下钻 / 扁平成株 / **目标株数**折叠（标签用成员名，不叫 `src`） |
+| 一株代表什么 | 自动（推荐）/ 按软件包 / 按文件夹 / 按源文件；自动时可调大约几棵 |
 | 多语言仓 | Maven 模块 + Java 包下钻；静态前端单独成株；文件采样按语言均衡 |
 | 点株下钻 | 子目录再生长，面包屑返回 |
 | 结构腐化 | 上帝模块、孤儿（保守）、不稳定性 I、热点核心 |
 | 污染扩散 | 严重违规沿藤 BFS 衰减 |
 | 规则 | layers 自动加厚；entry-only / import 黑名单 |
 | 模块地图 | merge / split / ignore |
-| 图边 | 跳过 type-only；dynamic / deep / paths；**package.json 软边** |
-| 时间轴 | **提交切片优先**，近似回退 |
+| 图边 | 跳过 type-only；dynamic / deep / paths；**package.json 软边**；**HTTP/API 跨语言藤** |
+| 时间轴 | **提交切片优先**，近似回退；**健康趋势**（下滑 / 回升 / 新循环） |
 | PR 双花园 | 两分支 tip 对比（Studio 下拉） |
 
 配置细节见 [docs/CONFIG.md](./docs/CONFIG.md)。
@@ -78,4 +78,5 @@ pnpm --filter @flora/cli start compare <abs> -- --base main --head feature/x --c
 ```bash
 pnpm build
 pnpm typecheck
+pnpm test
 ```

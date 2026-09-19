@@ -25,6 +25,7 @@ import {
   fitModulesToTarget,
   remapEdges,
 } from "./narrative.js";
+import { buildHttpEdges } from "./api-edges.js";
 
 interface PkgJson {
   name?: string;
@@ -410,6 +411,7 @@ function buildEdgesFromImports(
         weight,
         deep: deepFlags.get(key) ?? false,
         importSpecs: [...(specsMap.get(key) ?? [])],
+        source: "import" as const,
       };
     }),
     notes,
@@ -478,6 +480,7 @@ function buildEdgesFromPackageJson(
         weight,
         deep: false,
         importSpecs: [...(specsMap.get(key) ?? [])],
+        source: "workspace" as const,
       };
     }),
     notes,
@@ -488,6 +491,7 @@ function mergeEdges(
   primary: ModuleGraph["edges"],
   secondary: ModuleGraph["edges"],
 ): ModuleGraph["edges"] {
+  const rank: Record<string, number> = { import: 3, workspace: 2, http: 1 };
   const map = new Map<string, ModuleGraph["edges"][number]>();
   for (const e of primary) {
     map.set(`${e.from}→${e.to}`, { ...e });
@@ -503,11 +507,20 @@ function mergeEdges(
       ...(prev.importSpecs ?? []),
       ...(e.importSpecs ?? []),
     ]);
+    const httpPaths = new Set([
+      ...(prev.httpPaths ?? []),
+      ...(e.httpPaths ?? []),
+    ]);
+    const srcA = prev.source ?? "import";
+    const srcB = e.source ?? "import";
+    const source = (rank[srcA] ?? 0) >= (rank[srcB] ?? 0) ? srcA : srcB;
     map.set(key, {
       ...prev,
       weight: (prev.weight ?? 1) + (e.weight ?? 1),
       deep: Boolean(prev.deep || e.deep),
       importSpecs: [...specs],
+      httpPaths: httpPaths.size ? [...httpPaths] : undefined,
+      source,
     });
   }
   return [...map.values()];
@@ -1170,6 +1183,7 @@ function expandFlatSourceFiles(
       return false;
     }
     if (base === "index.ts" || base === "index.js" || base === "main.ts") return false;
+    if (base === "__init__.py" || base === "__main__.py") return false;
     return true;
   });
   if (files.length < 3 || files.length > 48) return null;
@@ -1197,6 +1211,16 @@ function expandFlatSourceFiles(
 }
 
 /** When auto would yield too few plants, drill into each package's internals. */
+const FLAT_EXPAND_MIN_FILES = 8;
+
+/** File-splitting a 3-file Python/Go package just creates fake orphans. */
+function isTrivialLeafSplit(inner: {
+  strategy: string;
+  modules: Array<{ path: string }>;
+}): boolean {
+  return inner.strategy === "flat-files" && inner.modules.length < FLAT_EXPAND_MIN_FILES;
+}
+
 function expandSparseModules(
   modules: ModuleGraph["modules"],
   repoRoot: string,
@@ -1212,6 +1236,8 @@ function expandSparseModules(
     `仅发现 ${modules.length} 个粗粒度模块，自动下钻以丰富花园（目标 ≥${minPlants} 株）`,
   ];
   let drilled = false;
+  /** Already a garden of packages — don't shatter tiny language packs into files. */
+  const siblingGarden = modules.length >= 3;
 
   for (const m of modules) {
     const multi = modules.length > 1;
@@ -1235,6 +1261,13 @@ function expandSparseModules(
     }
 
     if (inner && inner.modules.length >= 2) {
+      if (siblingGarden && isTrivialLeafSplit(inner)) {
+        expanded.push(m);
+        notes.push(
+          `保留小包「${m.label ?? m.id}」整株（${inner.modules.length} 个扁平文件，不拆碎）`,
+        );
+        continue;
+      }
       drilled = true;
       expanded.push(...inner.modules);
       notes.push(
@@ -1510,10 +1543,13 @@ export function discoverModuleGraph(
     effectiveIgnore,
   );
   const fromPkgs = buildEdgesFromPackageJson(discovered.modules);
+  const fromHttp = buildHttpEdges(abs, discovered.modules, effectiveIgnore);
   let edges = mergeEdges(fromImports.edges, fromPkgs.edges);
+  edges = mergeEdges(edges, fromHttp.edges);
   if (idRemap.size) edges = remapEdges(edges, idRemap);
   discovered.notes.push(...fromImports.notes);
   discovered.notes.push(...fromPkgs.notes);
+  discovered.notes.push(...fromHttp.notes);
   discovered.notes.push(`解析依赖边 ${edges.length}`);
   return {
     modules: discovered.modules,

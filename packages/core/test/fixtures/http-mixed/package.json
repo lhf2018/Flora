@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "name": "http-mixed-fixture",
+  "workspaces": [
+    "packages/web",
+    "packages/order",
+    "packages/catalog",
+    "packages/wallet"
+  ]
+}

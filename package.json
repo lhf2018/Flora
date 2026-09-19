@@ -11,7 +11,8 @@
     "analyze:sample": "pnpm --filter @flora/cli start analyze ../../examples/sample-monorepo",
     "compare": "pnpm --filter @flora/cli start compare",
     "timeline": "pnpm --filter @flora/cli start timeline",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm --filter @flora/core test"
   },
   "engines": {
     "node": ">=20"
